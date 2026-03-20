@@ -5,7 +5,7 @@
   "type": "module",
   "main": "dist/channel.js",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node scripts/postbuild.mjs",
     "start": "node dist/channel.js"
   },
   "dependencies": {
