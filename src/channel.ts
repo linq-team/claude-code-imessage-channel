@@ -83,9 +83,11 @@ const mcp = new Server(
 When you receive a message:
 - Read it and respond helpfully
 - Reply using the reply tool, passing the chat_id from the tag
+- Use the react tool to add tapback reactions (like, love, laugh, etc) when appropriate
 - You can also send messages to new numbers using the send tool
+- Read receipts and typing indicators are sent automatically
 
-The person texting you is your operator. Follow their instructions.
+The person texting you is your operator. Follow their instructions. Be concise in replies - this is iMessage, not email.
 Your iMessage number: ${config.fromPhone}`,
   },
 )
@@ -107,6 +109,19 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
+      name: 'react',
+      description: 'React to a message with a tapback (like, love, dislike, laugh, emphasis, question)',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          chat_id: { type: 'string', description: 'Chat ID' },
+          message_id: { type: 'string', description: 'Message ID to react to' },
+          reaction: { type: 'string', description: 'Reaction type: like, love, dislike, laugh, emphasis, question' },
+        },
+        required: ['chat_id', 'message_id', 'reaction'],
+      },
+    },
+    {
       name: 'send',
       description: 'Send an iMessage to a phone number',
       inputSchema: {
@@ -121,9 +136,9 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
   ],
 }))
 
-async function linqApiCall(endpoint: string, body: object): Promise<Response> {
+async function linqApiCall(endpoint: string, body: object, method = 'POST'): Promise<Response> {
   return fetch(`${config.apiUrl}/${endpoint}`, {
-    method: 'POST',
+    method,
     headers: {
       'Authorization': `Bearer ${config.token}`,
       'Content-Type': 'application/json',
@@ -132,12 +147,36 @@ async function linqApiCall(endpoint: string, body: object): Promise<Response> {
   })
 }
 
+// Auto read receipt + typing indicator helpers
+async function markRead(chatId: string): Promise<void> {
+  try {
+    await linqApiCall(`chats/${chatId}/read`, {})
+  } catch {}
+}
+
+async function startTyping(chatId: string): Promise<void> {
+  try {
+    await linqApiCall(`chats/${chatId}/typing`, {})
+  } catch {}
+}
+
+async function stopTyping(chatId: string): Promise<void> {
+  try {
+    await fetch(`${config.apiUrl}/chats/${chatId}/typing`, {
+      method: 'DELETE',
+      headers: { 'Authorization': `Bearer ${config.token}` },
+    })
+  } catch {}
+}
+
 mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args } = req.params
 
   if (name === 'reply') {
     const { chat_id, text } = args as { chat_id: string; text: string }
     try {
+      // Stop typing before sending
+      await stopTyping(chat_id)
       const resp = await linqApiCall(`chats/${chat_id}/messages`, {
         message: { parts: [{ type: 'text', value: text }] },
       })
@@ -146,6 +185,22 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         return { content: [{ type: 'text' as const, text: `Failed: ${err}` }], isError: true }
       }
       return { content: [{ type: 'text' as const, text: 'sent via iMessage' }] }
+    } catch (e: any) {
+      return { content: [{ type: 'text' as const, text: `Error: ${e.message}` }], isError: true }
+    }
+  }
+
+  if (name === 'react') {
+    const { chat_id, message_id, reaction } = args as { chat_id: string; message_id: string; reaction: string }
+    try {
+      const resp = await linqApiCall(`chats/${chat_id}/messages/${message_id}/react`, {
+        reaction,
+      })
+      if (!resp.ok) {
+        const err = await resp.text()
+        return { content: [{ type: 'text' as const, text: `Failed: ${err}` }], isError: true }
+      }
+      return { content: [{ type: 'text' as const, text: `reacted with ${reaction}` }] }
     } catch (e: any) {
       return { content: [{ type: 'text' as const, text: `Error: ${e.message}` }], isError: true }
     }
@@ -213,6 +268,12 @@ const webhookServer = http.createServer(async (req, res) => {
       res.writeHead(200)
       res.end('ok')
       return
+    }
+
+    // Auto read receipt + typing indicator
+    if (chatId) {
+      markRead(chatId)
+      startTyping(chatId)
     }
 
     // Push to Claude Code
