@@ -1,29 +1,31 @@
 # iMessage Channel for Claude Code
 
-Text your Claude Code session from iMessage. Two-way: send a text, Claude reads it and replies back via iMessage.
+Text your Claude Code session from iMessage. Two-way: you send a text, Claude reads it and replies back via iMessage. Powered by [Linq](https://linqapp.com).
 
-Powered by [Linq](https://linqapp.com) - iMessage API infrastructure.
-
-## How it works
+## Demo
 
 ```
-Your phone (iMessage) → Linq → webhook → this channel → Claude Code session
-Claude reply → Linq API → iMessage → your phone
+You (iMessage):  Hey there claude code
+Claude Code:     ← imessage: Hey there claude code
+                 ● imessage – reply(text: "Hey! What's up?")
+                   └ sent via iMessage
+You (iMessage):  [receives "Hey! What's up?"]
 ```
 
-## Setup
+## Quick Start
 
-### 1. Get a Linq account
+### 1. Prerequisites
 
-Sign up at [linqapp.com](https://linqapp.com) and get your API token from [Integration Details](https://zero.linqapp.com/api-tooling/).
+- [Claude Code](https://claude.ai/code) v2.1.80+
+- [Node.js](https://nodejs.org) >= 22
+- A [Linq](https://linqapp.com) account with API access
 
-### 2. Clone and build
+### 2. Install
 
 ```bash
 git clone https://github.com/linq-team/claude-code-imessage-channel.git
 cd claude-code-imessage-channel
-npm install
-npm run build
+npm install && npm run build
 ```
 
 ### 3. Configure
@@ -44,20 +46,36 @@ cat > ~/.linq/config.json << 'EOF'
 EOF
 ```
 
-Or use environment variables:
+Get your API token from the [Linq dashboard](https://zero.linqapp.com/api-tooling/).
+
+### 4. Run
 
 ```bash
-export LINQ_TOKEN="your-api-token"
-export LINQ_FROM_PHONE="+1XXXXXXXXXX"
+claude --dangerously-skip-permissions --dangerously-load-development-channels server:imessage
 ```
 
-### 4. Run with Claude Code
+Text your Linq number from your phone. Claude reads it and replies via iMessage.
 
-```bash
-claude --dangerously-load-development-channels server:imessage
+## How It Works
+
+```
+Your phone → iMessage → Linq → poller → Claude Code session
+Claude reply → Linq API → iMessage → your phone
 ```
 
-Text your Linq number from your phone. The message appears in your Claude Code session. Claude replies back via iMessage.
+The channel server polls the Linq API every 3 seconds for new messages (like Telegram's long-polling). No webhook URL, no ngrok, no port forwarding needed.
+
+When Claude starts, it automatically texts you to let you know it's online.
+
+## Features
+
+- **Two-way iMessage** - text in, get replies back as iMessages
+- **Read receipts** - auto-sent when your message is received
+- **Typing indicators** - shows typing while Claude processes
+- **Tapback reactions** - Claude can react with like, love, laugh, etc.
+- **Contact card** - set a custom name and photo via `POST /v3/contact_card`
+- **Sender gating** - restrict who can message your session
+- **No ngrok needed** - polling-based, works behind any firewall
 
 ## Configuration
 
@@ -78,60 +96,88 @@ Text your Linq number from your phone. The message appears in your Claude Code s
 
 ### Environment variables
 
-| Variable | Description |
-|----------|-------------|
-| `LINQ_TOKEN` | Linq API token (overrides config file) |
-| `LINQ_FROM_PHONE` | Your Linq phone number |
-| `LINQ_API_URL` | Custom API URL (default: `https://api.linqapp.com/v3`) |
-| `LINQ_CHANNEL_PORT` | Webhook listener port (default: `9998`) |
-| `LINQ_ALLOWED_SENDERS` | Comma-separated phone numbers allowed to message (sender gating) |
-| `LINQ_PROFILE` | Active config profile name |
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `LINQ_TOKEN` | Linq API token | from config |
+| `LINQ_FROM_PHONE` | Your Linq phone number | from config |
+| `LINQ_ALLOWED_SENDERS` | Comma-separated sender allowlist | all |
+| `LINQ_POLL_INTERVAL` | Poll interval in ms | `3000` |
+| `LINQ_CHANNEL_PORT` | Webhook fallback port | `9998` |
+| `LINQ_API_URL` | Custom API URL | `https://api.linqapp.com/v3` |
+| `LINQ_PROFILE` | Active config profile | `default` |
 
 ### Sender gating
 
 Restrict who can push messages into your session:
 
 ```bash
-export LINQ_ALLOWED_SENDERS="+12025551234,+12025551234"
+export LINQ_ALLOWED_SENDERS="+12025551234,+12025555678"
 ```
 
-Only messages from these numbers will be forwarded to Claude. All others are silently dropped.
-
 ## Tools
-
-The channel exposes two tools to Claude:
 
 | Tool | Description |
 |------|-------------|
 | `reply` | Reply to an inbound iMessage conversation |
 | `send` | Send an iMessage to any phone number |
+| `react` | Tapback reaction (like, love, laugh, dislike, emphasis, question) |
+
+## Plugin Structure
+
+```
+claude-code-imessage-channel/
+├── .claude-plugin/
+│   └── plugin.json          # Plugin manifest
+├── .mcp.json                # MCP server config
+├── skills/
+│   └── imessage/
+│       └── SKILL.md         # iMessage skill for Claude
+├── src/
+│   └── channel.ts           # Channel server (polling + webhook fallback)
+├── CLAUDE.md                # Instructions for Claude
+├── package.json
+└── tsconfig.json
+```
+
+## Set Contact Card
+
+Set a custom name and photo that recipients see in iMessage:
+
+```bash
+curl -X POST "https://api.linqapp.com/v3/contact_card" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phone_number": "+1XXXXXXXXXX",
+    "first_name": "Claude",
+    "last_name": "Code",
+    "image_url": "https://your-cdn.com/avatar.png"
+  }'
+```
+
+Then share it with a specific chat:
+
+```bash
+curl -X POST "https://api.linqapp.com/v3/chats/CHAT_ID/share_contact_card" \
+  -H "Authorization: Bearer YOUR_TOKEN"
+```
 
 ## Architecture
 
-This is a [Claude Code channel](https://code.claude.com/docs/en/channels) - an MCP server that pushes events into your session.
+This is a [Claude Code channel](https://code.claude.com/docs/en/channels) - an MCP server that pushes events into your session via the `claude/channel` experimental capability.
 
-1. **Inbound**: Linq receives an iMessage to your number, fires a webhook to the local listener, which pushes a `<channel>` event into Claude Code
-2. **Outbound**: Claude calls the `reply` or `send` tool, which hits the Linq API to send an iMessage
+The server uses **polling** (not webhooks) to check for new messages, similar to how the official Telegram channel works. This means:
 
-The channel runs as a subprocess spawned by Claude Code, communicating over stdio.
-
-## Webhook setup
-
-For inbound messages to reach your session, you need a webhook subscription in Linq pointing to your channel's local port. Use [ngrok](https://ngrok.com) or [Cloudflare Tunnel](https://developers.cloudflare.com/cloudflare-one/connections/connect-apps/) to expose the local port:
-
-```bash
-# Start a tunnel
-ngrok http 9998
-
-# Create webhook subscription via Linq API or dashboard
-# pointing to your ngrok URL
-```
+- No public URL needed
+- Works behind firewalls and NATs
+- No ngrok or tunnel setup
+- Webhook listener on port 9998 as fallback if you prefer webhooks
 
 ## Requirements
 
 - Node.js >= 22
-- A [Linq](https://linqapp.com) account with API access
 - Claude Code v2.1.80+ with channels support
+- A [Linq](https://linqapp.com) account with an API token and phone number
 
 ## License
 
