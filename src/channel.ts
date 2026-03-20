@@ -231,8 +231,94 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 
 await mcp.connect(new StdioServerTransport())
 
-// --- Webhook Listener for Inbound Messages ---
+// --- Message Polling (like Telegram's long-polling approach) ---
+// No ngrok needed - we poll the Linq API for new messages every few seconds
 
+const POLL_INTERVAL = parseInt(process.env.LINQ_POLL_INTERVAL || '3000', 10)
+const seenMessageIds = new Set<string>()
+let lastPollTime = new Date().toISOString()
+
+async function pollForMessages(): Promise<void> {
+  try {
+    // Get chats for this phone number
+    const chatsResp = await fetch(`${config.apiUrl}/chats?from=${encodeURIComponent(config.fromPhone)}&limit=10`, {
+      headers: { 'Authorization': `Bearer ${config.token}` },
+    })
+    if (!chatsResp.ok) return
+
+    const chatsData = await chatsResp.json() as any
+    const chats = chatsData.chats || []
+
+    for (const chat of chats) {
+      const chatId = chat.id
+      // Get recent messages in this chat
+      const msgsResp = await fetch(`${config.apiUrl}/chats/${chatId}/messages?limit=5`, {
+        headers: { 'Authorization': `Bearer ${config.token}` },
+      })
+      if (!msgsResp.ok) continue
+
+      const msgsData = await msgsResp.json() as any
+      const messages = msgsData.messages || []
+
+      for (const msg of messages) {
+        // Skip if already seen
+        if (seenMessageIds.has(msg.id)) continue
+        seenMessageIds.add(msg.id)
+
+        // Skip our own outbound messages
+        if (msg.is_from_me) continue
+
+        // Skip old messages (before channel started)
+        const msgTime = new Date(msg.sent_at || msg.created_at || 0)
+        const startTime = new Date(lastPollTime)
+        if (msgTime < startTime) continue
+
+        const messageText = msg.text || ''
+        if (!messageText) continue
+
+        // Extract sender from handles
+        const sender = msg.from || chat.handles?.find((h: any) => !h.is_me)?.handle || ''
+
+        // Sender gating
+        if (config.allowedSenders.size > 0 && !config.allowedSenders.has(sender)) {
+          console.error(`[imessage] Dropped message from ${sender} (not in allowlist)`)
+          continue
+        }
+
+        // Auto read receipt + typing indicator
+        markRead(chatId)
+        startTyping(chatId)
+
+        // Push to Claude Code
+        await mcp.notification({
+          method: 'notifications/claude/channel',
+          params: {
+            content: messageText,
+            meta: {
+              sender,
+              chat_id: chatId,
+              message_id: msg.id,
+            },
+          },
+        })
+
+        console.error(`[imessage] ${sender}: ${messageText.substring(0, 80)}`)
+      }
+    }
+
+    // Cap the seen set size
+    if (seenMessageIds.size > 1000) {
+      const arr = [...seenMessageIds]
+      arr.splice(0, arr.length - 500)
+      seenMessageIds.clear()
+      arr.forEach(id => seenMessageIds.add(id))
+    }
+  } catch (e: any) {
+    console.error(`[imessage] Poll error: ${e.message}`)
+  }
+}
+
+// Also keep the webhook listener as a fallback
 const webhookServer = http.createServer(async (req, res) => {
   if (req.method !== 'POST') {
     res.writeHead(405)
@@ -246,51 +332,29 @@ const webhookServer = http.createServer(async (req, res) => {
 
   try {
     const event = JSON.parse(body)
-
-    // Parse Synapse webhook payload
-    const eventType = event.type || event.event_type || ''
     const data = event.data || event
     const messageText = data.message?.text || data.text || ''
     const sender = data.message?.from || data.from || ''
     const chatId = data.chat?.id || data.chat_id || ''
-    const senderName = data.message?.from_name || data.from_name || sender
+    const messageId = data.message?.id || ''
 
-    // Skip non-message events and outbound messages
-    if (!messageText) {
-      res.writeHead(200)
-      res.end('ok')
-      return
-    }
+    if (!messageText) { res.writeHead(200); res.end('ok'); return }
+    if (messageId) seenMessageIds.add(messageId) // prevent duplicate from polling
 
-    // Sender gating
     if (config.allowedSenders.size > 0 && !config.allowedSenders.has(sender)) {
-      console.error(`[imessage] Dropped message from ${sender} (not in allowlist)`)
-      res.writeHead(200)
-      res.end('ok')
-      return
+      res.writeHead(200); res.end('ok'); return
     }
 
-    // Auto read receipt + typing indicator
-    if (chatId) {
-      markRead(chatId)
-      startTyping(chatId)
-    }
+    if (chatId) { markRead(chatId); startTyping(chatId) }
 
-    // Push to Claude Code
     await mcp.notification({
       method: 'notifications/claude/channel',
       params: {
         content: messageText,
-        meta: {
-          sender,
-          sender_name: senderName,
-          chat_id: chatId,
-          event_type: eventType,
-        },
+        meta: { sender, chat_id: chatId, message_id: messageId },
       },
     })
-
-    console.error(`[imessage] ${sender}: ${messageText.substring(0, 80)}`)
+    console.error(`[imessage] webhook: ${sender}: ${messageText.substring(0, 80)}`)
   } catch (e: any) {
     console.error(`[imessage] Webhook error: ${e.message}`)
   }
@@ -301,10 +365,15 @@ const webhookServer = http.createServer(async (req, res) => {
 
 webhookServer.listen(config.webhookPort, '127.0.0.1', () => {
   console.error(`[imessage] Channel ready`)
-  console.error(`[imessage]   Webhook: http://127.0.0.1:${config.webhookPort}`)
+  console.error(`[imessage]   Polling: every ${POLL_INTERVAL}ms`)
+  console.error(`[imessage]   Webhook: http://127.0.0.1:${config.webhookPort} (fallback)`)
   console.error(`[imessage]   From:    ${config.fromPhone}`)
   console.error(`[imessage]   API:     ${config.apiUrl}`)
   if (config.allowedSenders.size > 0) {
     console.error(`[imessage]   Allowed: ${[...config.allowedSenders].join(', ')}`)
   }
+
+  // Start polling loop
+  setInterval(pollForMessages, POLL_INTERVAL)
+  console.error(`[imessage]   Polling started`)
 })
