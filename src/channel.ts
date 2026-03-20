@@ -40,7 +40,7 @@ function loadChannelConfig(): ChannelConfig {
   // Try config file first, then env vars
   let token = process.env.LINQ_TOKEN || ''
   let fromPhone = process.env.LINQ_FROM_PHONE || ''
-  let apiUrl = process.env.LINQ_API_URL || 'https://api.linqapp.com/api/partner'
+  let apiUrl = process.env.LINQ_API_URL || 'https://api.linqapp.com/v3'
 
   const configPath = path.join(process.env.HOME || '', '.linq', 'config.json')
   if (fs.existsSync(configPath)) {
