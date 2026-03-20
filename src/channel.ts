@@ -112,7 +112,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: 'object' as const,
         properties: {
-          to: { type: 'string', description: 'Phone number (e.g. +19178034541)' },
+          to: { type: 'string', description: 'Phone number (e.g. +12025551234)' },
           text: { type: 'string', description: 'Message to send' },
         },
         required: ['to', 'text'],

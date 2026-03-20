@@ -92,7 +92,7 @@ Text your Linq number from your phone. The message appears in your Claude Code s
 Restrict who can push messages into your session:
 
 ```bash
-export LINQ_ALLOWED_SENDERS="+19178034541,+12025551234"
+export LINQ_ALLOWED_SENDERS="+12025551234,+12025551234"
 ```
 
 Only messages from these numbers will be forwarded to Claude. All others are silently dropped.
