@@ -485,15 +485,20 @@ webhookServer.listen(config.webhookPort, '127.0.0.1', () => {
           },
         },
       })
+    } else if (!config.token || !config.fromPhone) {
+      await mcp.notification({
+        method: 'notifications/claude/channel',
+        params: {
+          content: 'Channel connected but Linq is not configured. Walk the user through setup:\n1. Check if linq CLI is installed: `which linq`\n2. If not: `curl -fsSL https://raw.githubusercontent.com/linq-team/linq-cli/main/install.sh | sh`\n3. Run: `linq signup` (GitHub auth, provisions sandbox number)\n4. Run: `linq profile` to get token and phone number\n5. Write ~/.linq/config.json with their credentials\n6. Ask for their personal phone number to text them\nOr they can run /imessage:configure for guided setup.',
+          meta: { sender: 'system', event_type: 'setup_required' },
+        },
+      })
     } else {
       await mcp.notification({
         method: 'notifications/claude/channel',
         params: {
           content: 'Channel connected but no recipient phone number is configured. Ask the user: "What\'s your phone number? I\'ll text you to confirm the connection." Then use the send tool with their number. Remember the number for future messages.',
-          meta: {
-            sender: 'system',
-            event_type: 'channel_ready_no_recipient',
-          },
+          meta: { sender: 'system', event_type: 'channel_ready_no_recipient' },
         },
       })
     }

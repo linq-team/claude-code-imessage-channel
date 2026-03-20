@@ -18,7 +18,6 @@ You (iMessage):  [receives "Hey! What's up?"]
 
 - [Claude Code](https://claude.ai/code) v2.1.80+
 - [Node.js](https://nodejs.org) >= 22
-- A [Linq](https://linqapp.com) account with API access
 
 ### 2. Install
 
@@ -28,7 +27,22 @@ cd claude-code-imessage-channel
 npm install && npm run build
 ```
 
-### 3. Configure
+### 3. Get a Linq number (free sandbox)
+
+```bash
+# Install the Linq CLI
+curl -fsSL https://raw.githubusercontent.com/linq-team/linq-cli/main/install.sh | sh
+
+# Sign up (authenticates via GitHub, provisions a sandbox number)
+linq signup
+
+# See your token and phone number
+linq profile
+```
+
+Or if you already have a Linq account, get your token from the [Linq dashboard](https://zero.linqapp.com/api-tooling/).
+
+### 4. Configure
 
 ```bash
 mkdir -p ~/.linq
@@ -38,23 +52,23 @@ cat > ~/.linq/config.json << 'EOF'
   "profile": "default",
   "profiles": {
     "default": {
-      "token": "YOUR_LINQ_API_TOKEN",
-      "fromPhone": "+1XXXXXXXXXX"
+      "token": "YOUR_TOKEN_FROM_LINQ_PROFILE",
+      "fromPhone": "+1YOUR_LINQ_NUMBER"
     }
   }
 }
 EOF
 ```
 
-Get your API token from the [Linq dashboard](https://zero.linqapp.com/api-tooling/).
-
-### 4. Run
+### 5. Run
 
 ```bash
 claude --dangerously-skip-permissions --dangerously-load-development-channels server:imessage
 ```
 
-Text your Linq number from your phone. Claude reads it and replies via iMessage.
+Claude texts you on startup. Text back and it responds via iMessage.
+
+**No Linq account?** Just start Claude Code - it'll walk you through setup in the terminal.
 
 ## How It Works
 
