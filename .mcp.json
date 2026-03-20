@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "imessage": {
+      "command": "node",
+      "args": ["./dist/channel.js"]
+    }
+  }
+}

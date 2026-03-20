@@ -1,0 +1,12 @@
+{
+  "name": "imessage",
+  "description": "iMessage channel for Claude Code. Text your AI from your phone via iMessage, powered by Linq.",
+  "version": "0.1.0",
+  "author": {
+    "name": "Linq",
+    "url": "https://linqapp.com"
+  },
+  "homepage": "https://github.com/linq-team/claude-code-imessage-channel",
+  "repository": "https://github.com/linq-team/claude-code-imessage-channel",
+  "license": "MIT"
+}

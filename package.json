@@ -1,0 +1,26 @@
+{
+  "name": "claude-code-imessage-channel",
+  "version": "0.1.0",
+  "description": "iMessage channel for Claude Code — text your AI assistant via iMessage, powered by Linq",
+  "type": "module",
+  "main": "dist/channel.js",
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/channel.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.1"
+  },
+  "devDependencies": {
+    "typescript": "^5.7.0",
+    "@types/node": "^22.0.0"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/linq-team/claude-code-imessage-channel.git"
+  }
+}
