@@ -42,6 +42,7 @@ function loadChannelConfig(): ChannelConfig {
   let token = process.env.LINQ_TOKEN || ''
   let fromPhone = process.env.LINQ_FROM_PHONE || ''
   let apiUrl = process.env.LINQ_API_URL || 'https://api.linqapp.com/v3'
+  let defaultRecipient = process.env.LINQ_DEFAULT_RECIPIENT || ''
 
   const configPath = path.join(process.env.HOME || '', '.linq', 'config.json')
   if (fs.existsSync(configPath)) {
@@ -53,6 +54,7 @@ function loadChannelConfig(): ChannelConfig {
         token = token || profile.token || ''
         fromPhone = fromPhone || profile.fromPhone || ''
         if (profile.apiUrl) apiUrl = profile.apiUrl
+        if (profile.defaultRecipient) defaultRecipient = profile.defaultRecipient
       }
     } catch {}
   }
@@ -62,7 +64,7 @@ function loadChannelConfig(): ChannelConfig {
     fromPhone,
     apiUrl,
     webhookPort: parseInt(process.env.LINQ_CHANNEL_PORT || '9998', 10),
-    defaultRecipient: process.env.LINQ_DEFAULT_RECIPIENT || '',
+    defaultRecipient,
     allowedSenders: new Set(
       (process.env.LINQ_ALLOWED_SENDERS || '').split(',').filter(Boolean)
     ),
@@ -452,55 +454,63 @@ const webhookServer = http.createServer(async (req, res) => {
   res.end('ok')
 })
 
-webhookServer.listen(config.webhookPort, '127.0.0.1', () => {
-  console.error(`[imessage] Channel ready`)
-  console.error(`[imessage]   Polling: every ${POLL_INTERVAL}ms`)
-  console.error(`[imessage]   Webhook: http://127.0.0.1:${config.webhookPort} (fallback)`)
-  console.error(`[imessage]   From:    ${config.fromPhone}`)
-  console.error(`[imessage]   API:     ${config.apiUrl}`)
-  if (config.allowedSenders.size > 0) {
-    console.error(`[imessage]   Allowed: ${[...config.allowedSenders].join(', ')}`)
+webhookServer.on('error', (err: any) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[imessage]   Webhook: port ${config.webhookPort} in use, skipping (polling still active)`)
+  } else {
+    console.error(`[imessage]   Webhook error: ${err.message}`)
   }
-
-  // Auto-setup contact card (name: "Claude Code", logo)
-  setupContactCard()
-
-  // Start polling loop
-  setInterval(pollForMessages, POLL_INTERVAL)
-  console.error(`[imessage]   Polling started`)
-
-  // Notify Claude that the channel is ready - greet the user via iMessage
-  setTimeout(async () => {
-    const allowedList = [...config.allowedSenders]
-    const recipient = config.defaultRecipient || (allowedList.length > 0 ? allowedList[0] : '')
-    if (recipient) {
-      await mcp.notification({
-        method: 'notifications/claude/channel',
-        params: {
-          content: `Channel connected. Send a greeting NOW by calling the send tool with to="${recipient}" and a brief message like "Hey, Claude Code is online. Text me anything."`,
-          meta: {
-            sender: 'system',
-            event_type: 'channel_ready',
-            recipient,
-          },
-        },
-      })
-    } else if (!config.token || !config.fromPhone) {
-      await mcp.notification({
-        method: 'notifications/claude/channel',
-        params: {
-          content: 'Channel connected but Linq is not configured. Walk the user through setup:\n1. Check if linq CLI is installed: `which linq`\n2. If not: `curl -fsSL https://raw.githubusercontent.com/linq-team/linq-cli/main/install.sh | sh`\n3. Run: `linq signup` (GitHub auth, provisions sandbox number)\n4. Run: `linq profile` to get token and phone number\n5. Write ~/.linq/config.json with their credentials\n6. Ask for their personal phone number to text them\nOr they can run /imessage:configure for guided setup.',
-          meta: { sender: 'system', event_type: 'setup_required' },
-        },
-      })
-    } else {
-      await mcp.notification({
-        method: 'notifications/claude/channel',
-        params: {
-          content: 'Channel connected but no recipient phone number is configured. Ask the user: "What\'s your phone number? I\'ll text you to confirm the connection." Then use the send tool with their number. Remember the number for future messages.',
-          meta: { sender: 'system', event_type: 'channel_ready_no_recipient' },
-        },
-      })
-    }
-  }, 2000)
 })
+
+webhookServer.listen(config.webhookPort, '127.0.0.1', () => {
+  console.error(`[imessage]   Webhook: http://127.0.0.1:${config.webhookPort} (fallback)`)
+})
+
+// --- Startup (runs regardless of webhook) ---
+
+console.error(`[imessage] Channel ready`)
+console.error(`[imessage]   Polling: every ${POLL_INTERVAL}ms`)
+console.error(`[imessage]   From:    ${config.fromPhone}`)
+console.error(`[imessage]   API:     ${config.apiUrl}`)
+if (config.allowedSenders.size > 0) {
+  console.error(`[imessage]   Allowed: ${[...config.allowedSenders].join(', ')}`)
+}
+
+setupContactCard()
+
+setInterval(pollForMessages, POLL_INTERVAL)
+console.error(`[imessage]   Polling started`)
+
+setTimeout(async () => {
+  const allowedList = [...config.allowedSenders]
+  const recipient = config.defaultRecipient || (allowedList.length > 0 ? allowedList[0] : '')
+  if (recipient) {
+    await mcp.notification({
+      method: 'notifications/claude/channel',
+      params: {
+        content: `Channel connected. Send a greeting NOW by calling the send tool with to="${recipient}" and a brief message like "Hey, Claude Code is online. Text me anything."`,
+        meta: {
+          sender: 'system',
+          event_type: 'channel_ready',
+          recipient,
+        },
+      },
+    })
+  } else if (!config.token || !config.fromPhone) {
+    await mcp.notification({
+      method: 'notifications/claude/channel',
+      params: {
+        content: 'Channel connected but Linq is not configured. Walk the user through setup:\n1. Check if linq CLI is installed: `which linq`\n2. If not: `curl -fsSL https://raw.githubusercontent.com/linq-team/linq-cli/main/install.sh | sh`\n3. Run: `linq signup` (GitHub auth, provisions sandbox number)\n4. Run: `linq profile` to get token and phone number\n5. Write ~/.linq/config.json with their credentials\n6. Ask for their personal phone number to text them\nOr they can run /imessage:configure for guided setup.',
+        meta: { sender: 'system', event_type: 'setup_required' },
+      },
+    })
+  } else {
+    await mcp.notification({
+      method: 'notifications/claude/channel',
+      params: {
+        content: 'Channel connected but no recipient phone number is configured. Ask the user: "What\'s your phone number? I\'ll text you to confirm the connection." Then use the send tool with their number. Remember the number for future messages.',
+        meta: { sender: 'system', event_type: 'channel_ready_no_recipient' },
+      },
+    })
+  }
+}, 2000)

@@ -137,6 +137,7 @@ async function doSignIn() {
   config.profiles.default = {
     token: token.trim(),
     fromPhone: normalized,
+    ...(recipient && { defaultRecipient: recipient }),
   }
   config.profile = 'default'
   saveJson(LINQ_CONFIG_PATH, config)
@@ -170,6 +171,7 @@ async function doSignup() {
     partnerId: data.partnerId,
     expiresAt: data.expiresAt,
     githubLogin: data.githubLogin,
+    defaultRecipient: phone,
   }
   config.profile = 'sandbox'
   saveJson(LINQ_CONFIG_PATH, config)
@@ -198,29 +200,19 @@ async function doAuth() {
 
 // --- Claude Code MCP Registration ---
 
-function registerMcpServer(defaultRecipient) {
+function registerMcpServer() {
   let settings = loadJson(CLAUDE_SETTINGS_PATH) || {}
   if (!settings.mcpServers) settings.mcpServers = {}
 
-  const env = {}
-  if (defaultRecipient) env.LINQ_DEFAULT_RECIPIENT = defaultRecipient
-
   const existing = settings.mcpServers.imessage
   if (existing && existing.args?.[0] === CHANNEL_ENTRYPOINT) {
-    if (defaultRecipient && existing.env?.LINQ_DEFAULT_RECIPIENT !== defaultRecipient) {
-      existing.env = { ...existing.env, ...env }
-      saveJson(CLAUDE_SETTINGS_PATH, settings)
-      console.log('[imessage] updated default recipient in ~/.claude/settings.json')
-    } else {
-      console.log('[imessage] already registered in ~/.claude/settings.json')
-    }
+    console.log('[imessage] already registered in ~/.claude/settings.json')
     return
   }
 
   settings.mcpServers.imessage = {
     command: 'node',
     args: [CHANNEL_ENTRYPOINT],
-    ...(Object.keys(env).length > 0 && { env }),
   }
 
   saveJson(CLAUDE_SETTINGS_PATH, settings)
@@ -244,7 +236,7 @@ async function main() {
     console.log('[imessage] linq credentials found')
   }
 
-  registerMcpServer(defaultRecipient)
+  registerMcpServer()
 }
 
 main()
