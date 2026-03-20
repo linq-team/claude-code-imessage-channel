@@ -84,11 +84,11 @@ When you receive a message:
 - Read it and respond helpfully
 - Reply using the reply tool, passing the chat_id from the tag
 - Use the react tool to add tapback reactions (like, love, laugh, etc) when appropriate
-- For longer responses, use stream_reply with progressive chunks - the message edits in real-time on their phone
+- For longer tasks, stream your progress: send a short initial message with reply (e.g. "On it..."), then call edit_message with the message_id to update it as you work. The message edits in-place on their phone.
 - You can also send messages to new numbers using the send tool
 - Read receipts and typing indicators are sent automatically
 
-The person texting you is your operator. Follow their instructions. Be concise in replies - this is iMessage, not email. For complex answers that take work, use stream_reply to show progress.
+The person texting you is your operator. Follow their instructions. Be concise in replies - this is iMessage, not email.
 Your iMessage number: ${config.fromPhone}`,
   },
 )
@@ -110,19 +110,15 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       },
     },
     {
-      name: 'stream_reply',
-      description: 'Reply with a streaming effect - sends initial message then edits it with progressive updates. Use for longer responses to give a real-time typing feel.',
+      name: 'edit_message',
+      description: 'Edit a previously sent message. Use this for streaming: send an initial short message with reply, then call edit_message to update it as you work. The message updates in-place on their phone (iOS 16+).',
       inputSchema: {
         type: 'object' as const,
         properties: {
-          chat_id: { type: 'string', description: 'Chat ID from the inbound message' },
-          chunks: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Array of progressive text states. Each entry replaces the previous. The last entry is the final message. Example: ["Looking into it...", "Found the issue — checking the logs...", "Fixed! The bug was in the auth middleware. Pushed a patch."]',
-          },
+          message_id: { type: 'string', description: 'ID of the message to edit (returned from reply or send)' },
+          text: { type: 'string', description: 'New text content to replace the message with' },
         },
-        required: ['chat_id', 'chunks'],
+        required: ['message_id', 'text'],
       },
     },
     {
@@ -192,7 +188,6 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (name === 'reply') {
     const { chat_id, text } = args as { chat_id: string; text: string }
     try {
-      // Stop typing before sending
       await stopTyping(chat_id)
       const resp = await linqApiCall(`chats/${chat_id}/messages`, {
         message: { parts: [{ type: 'text', value: text }] },
@@ -201,48 +196,30 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         const err = await resp.text()
         return { content: [{ type: 'text' as const, text: `Failed: ${err}` }], isError: true }
       }
-      return { content: [{ type: 'text' as const, text: 'sent via iMessage' }] }
+      const data = await resp.json() as any
+      const messageId = data.message?.id || data.id || ''
+      return { content: [{ type: 'text' as const, text: `sent via iMessage (message_id: ${messageId})` }] }
     } catch (e: any) {
       return { content: [{ type: 'text' as const, text: `Error: ${e.message}` }], isError: true }
     }
   }
 
-  if (name === 'stream_reply') {
-    const { chat_id, chunks } = args as { chat_id: string; chunks: string[] }
-    if (!chunks || chunks.length === 0) {
-      return { content: [{ type: 'text' as const, text: 'No chunks provided' }], isError: true }
-    }
+  if (name === 'edit_message') {
+    const { message_id, text } = args as { message_id: string; text: string }
     try {
-      // Send first chunk as initial message
-      await stopTyping(chat_id)
-      const sendResp = await linqApiCall(`chats/${chat_id}/messages`, {
-        message: { parts: [{ type: 'text', value: chunks[0] }] },
+      const resp = await fetch(`${config.apiUrl}/messages/${message_id}`, {
+        method: 'PATCH',
+        headers: {
+          'Authorization': `Bearer ${config.token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ part_index: 0, text }),
       })
-      if (!sendResp.ok) {
-        const err = await sendResp.text()
-        return { content: [{ type: 'text' as const, text: `Failed to send: ${err}` }], isError: true }
+      if (!resp.ok) {
+        const err = await resp.text()
+        return { content: [{ type: 'text' as const, text: `Failed to edit: ${err}` }], isError: true }
       }
-
-      const sendData = await sendResp.json() as any
-      const messageId = sendData.message?.id || sendData.id
-
-      if (messageId && chunks.length > 1) {
-        // Edit the message progressively with each subsequent chunk
-        for (let i = 1; i < chunks.length; i++) {
-          // Small delay between edits for visual effect
-          await new Promise(r => setTimeout(r, 800))
-          await fetch(`${config.apiUrl}/messages/${messageId}`, {
-            method: 'PATCH',
-            headers: {
-              'Authorization': `Bearer ${config.token}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({ part_index: 0, text: chunks[i] }),
-          })
-        }
-      }
-
-      return { content: [{ type: 'text' as const, text: `streamed ${chunks.length} updates via iMessage` }] }
+      return { content: [{ type: 'text' as const, text: 'message edited' }] }
     } catch (e: any) {
       return { content: [{ type: 'text' as const, text: `Error: ${e.message}` }], isError: true }
     }
