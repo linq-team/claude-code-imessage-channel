@@ -377,4 +377,15 @@ webhookServer.listen(config.webhookPort, '127.0.0.1', () => {
   // Start polling loop
   setInterval(pollForMessages, POLL_INTERVAL)
   console.error(`[imessage]   Polling started`)
+
+  // Notify Claude that the channel is ready so it can greet the user
+  setTimeout(async () => {
+    await mcp.notification({
+      method: 'notifications/claude/channel',
+      params: {
+        content: 'Channel connected. Send a greeting to the user via iMessage to let them know you are online and ready.',
+        meta: { sender: 'system', event_type: 'channel_ready' },
+      },
+    })
+  }, 2000)
 })
