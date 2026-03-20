@@ -319,6 +319,57 @@ async function pollForMessages(): Promise<void> {
   }
 }
 
+// --- Auto Contact Card Setup ---
+
+const CLAUDE_CODE_LOGO = 'https://raw.githubusercontent.com/linq-team/claude-code-imessage-channel/main/assets/claude-code-logo.png'
+
+async function setupContactCard(): Promise<void> {
+  if (!config.fromPhone || !config.token) return
+
+  try {
+    // Check if contact card already exists
+    const getResp = await fetch(
+      `${config.apiUrl}/contact_card?phone_number=${encodeURIComponent(config.fromPhone)}`,
+      { headers: { 'Authorization': `Bearer ${config.token}` } }
+    )
+
+    if (getResp.ok) {
+      const data = await getResp.json() as any
+      const cards = data.contact_cards || []
+      const existing = cards.find((c: any) => c.phone_number === config.fromPhone && c.is_active)
+
+      if (existing && existing.first_name === 'Claude' && existing.last_name === 'Code') {
+        console.error(`[imessage]   Contact card already set: Claude Code`)
+        return
+      }
+    }
+
+    // Create or update contact card
+    const resp = await fetch(`${config.apiUrl}/contact_card`, {
+      method: 'POST',
+      headers: {
+        'Authorization': `Bearer ${config.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        phone_number: config.fromPhone,
+        first_name: 'Claude',
+        last_name: 'Code',
+        image_url: CLAUDE_CODE_LOGO,
+      }),
+    })
+
+    if (resp.ok) {
+      console.error(`[imessage]   Contact card set: Claude Code`)
+    } else {
+      const err = await resp.text()
+      console.error(`[imessage]   Contact card setup failed: ${err}`)
+    }
+  } catch (e: any) {
+    console.error(`[imessage]   Contact card setup error: ${e.message}`)
+  }
+}
+
 // Also keep the webhook listener as a fallback
 const webhookServer = http.createServer(async (req, res) => {
   if (req.method !== 'POST') {
@@ -373,6 +424,9 @@ webhookServer.listen(config.webhookPort, '127.0.0.1', () => {
   if (config.allowedSenders.size > 0) {
     console.error(`[imessage]   Allowed: ${[...config.allowedSenders].join(', ')}`)
   }
+
+  // Auto-setup contact card (name: "Claude Code", logo)
+  setupContactCard()
 
   // Start polling loop
   setInterval(pollForMessages, POLL_INTERVAL)
