@@ -33,6 +33,7 @@ interface ChannelConfig {
   fromPhone: string
   apiUrl: string
   webhookPort: number
+  defaultRecipient: string
   allowedSenders: Set<string>
 }
 
@@ -61,6 +62,7 @@ function loadChannelConfig(): ChannelConfig {
     fromPhone,
     apiUrl,
     webhookPort: parseInt(process.env.LINQ_CHANNEL_PORT || '9998', 10),
+    defaultRecipient: process.env.LINQ_DEFAULT_RECIPIENT || '',
     allowedSenders: new Set(
       (process.env.LINQ_ALLOWED_SENDERS || '').split(',').filter(Boolean)
     ),
@@ -470,17 +472,19 @@ webhookServer.listen(config.webhookPort, '127.0.0.1', () => {
   // Notify Claude that the channel is ready - greet the user via iMessage
   setTimeout(async () => {
     const allowedList = [...config.allowedSenders]
-    const recipient = allowedList.length > 0 ? allowedList[0] : ''
-    await mcp.notification({
-      method: 'notifications/claude/channel',
-      params: {
-        content: `Channel connected. Use the send tool to text ${recipient || 'the user'} a short greeting so they know you are online. Keep it brief, one sentence.`,
-        meta: {
-          sender: 'system',
-          event_type: 'channel_ready',
-          recipient,
+    const recipient = config.defaultRecipient || (allowedList.length > 0 ? allowedList[0] : '')
+    if (recipient) {
+      await mcp.notification({
+        method: 'notifications/claude/channel',
+        params: {
+          content: `Channel connected. Send a greeting NOW by calling the send tool with to="${recipient}" and a brief message like "Hey, Claude Code is online. Text me anything."`,
+          meta: {
+            sender: 'system',
+            event_type: 'channel_ready',
+            recipient,
+          },
         },
-      },
-    })
+      })
+    }
   }, 2000)
 })
