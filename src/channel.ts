@@ -485,6 +485,17 @@ webhookServer.listen(config.webhookPort, '127.0.0.1', () => {
           },
         },
       })
+    } else {
+      await mcp.notification({
+        method: 'notifications/claude/channel',
+        params: {
+          content: 'Channel connected but no recipient phone number is configured. Ask the user: "What\'s your phone number? I\'ll text you to confirm the connection." Then use the send tool with their number. Remember the number for future messages.',
+          meta: {
+            sender: 'system',
+            event_type: 'channel_ready_no_recipient',
+          },
+        },
+      })
     }
   }, 2000)
 })
