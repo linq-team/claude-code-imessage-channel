@@ -273,11 +273,12 @@ async function pollForMessages(): Promise<void> {
         const startTime = new Date(lastPollTime)
         if (msgTime < startTime) continue
 
-        const messageText = msg.text || ''
+        // Text is in parts[0].value, not msg.text
+        const messageText = msg.parts?.[0]?.value || msg.text || ''
         if (!messageText) continue
 
-        // Extract sender from handles
-        const sender = msg.from || chat.handles?.find((h: any) => !h.is_me)?.handle || ''
+        // Extract sender
+        const sender = msg.from || msg.from_handle?.handle || chat.handles?.find((h: any) => !h.is_me)?.handle || ''
 
         // Sender gating
         if (config.allowedSenders.size > 0 && !config.allowedSenders.has(sender)) {
