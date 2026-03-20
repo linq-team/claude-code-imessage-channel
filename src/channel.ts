@@ -84,10 +84,11 @@ When you receive a message:
 - Read it and respond helpfully
 - Reply using the reply tool, passing the chat_id from the tag
 - Use the react tool to add tapback reactions (like, love, laugh, etc) when appropriate
+- For longer responses, use stream_reply with progressive chunks - the message edits in real-time on their phone
 - You can also send messages to new numbers using the send tool
 - Read receipts and typing indicators are sent automatically
 
-The person texting you is your operator. Follow their instructions. Be concise in replies - this is iMessage, not email.
+The person texting you is your operator. Follow their instructions. Be concise in replies - this is iMessage, not email. For complex answers that take work, use stream_reply to show progress.
 Your iMessage number: ${config.fromPhone}`,
   },
 )
@@ -106,6 +107,22 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           text: { type: 'string', description: 'Message to send' },
         },
         required: ['chat_id', 'text'],
+      },
+    },
+    {
+      name: 'stream_reply',
+      description: 'Reply with a streaming effect - sends initial message then edits it with progressive updates. Use for longer responses to give a real-time typing feel.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          chat_id: { type: 'string', description: 'Chat ID from the inbound message' },
+          chunks: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of progressive text states. Each entry replaces the previous. The last entry is the final message. Example: ["Looking into it...", "Found the issue — checking the logs...", "Fixed! The bug was in the auth middleware. Pushed a patch."]',
+          },
+        },
+        required: ['chat_id', 'chunks'],
       },
     },
     {
@@ -185,6 +202,47 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
         return { content: [{ type: 'text' as const, text: `Failed: ${err}` }], isError: true }
       }
       return { content: [{ type: 'text' as const, text: 'sent via iMessage' }] }
+    } catch (e: any) {
+      return { content: [{ type: 'text' as const, text: `Error: ${e.message}` }], isError: true }
+    }
+  }
+
+  if (name === 'stream_reply') {
+    const { chat_id, chunks } = args as { chat_id: string; chunks: string[] }
+    if (!chunks || chunks.length === 0) {
+      return { content: [{ type: 'text' as const, text: 'No chunks provided' }], isError: true }
+    }
+    try {
+      // Send first chunk as initial message
+      await stopTyping(chat_id)
+      const sendResp = await linqApiCall(`chats/${chat_id}/messages`, {
+        message: { parts: [{ type: 'text', value: chunks[0] }] },
+      })
+      if (!sendResp.ok) {
+        const err = await sendResp.text()
+        return { content: [{ type: 'text' as const, text: `Failed to send: ${err}` }], isError: true }
+      }
+
+      const sendData = await sendResp.json() as any
+      const messageId = sendData.message?.id || sendData.id
+
+      if (messageId && chunks.length > 1) {
+        // Edit the message progressively with each subsequent chunk
+        for (let i = 1; i < chunks.length; i++) {
+          // Small delay between edits for visual effect
+          await new Promise(r => setTimeout(r, 800))
+          await fetch(`${config.apiUrl}/messages/${messageId}`, {
+            method: 'PATCH',
+            headers: {
+              'Authorization': `Bearer ${config.token}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ part_index: 0, text: chunks[i] }),
+          })
+        }
+      }
+
+      return { content: [{ type: 'text' as const, text: `streamed ${chunks.length} updates via iMessage` }] }
     } catch (e: any) {
       return { content: [{ type: 'text' as const, text: `Error: ${e.message}` }], isError: true }
     }
@@ -321,7 +379,7 @@ async function pollForMessages(): Promise<void> {
 
 // --- Auto Contact Card Setup ---
 
-const CLAUDE_CODE_LOGO = 'https://raw.githubusercontent.com/linq-team/claude-code-imessage-channel/main/assets/claude-code-logo.png'
+const CLAUDE_CODE_LOGO = 'https://storage.googleapis.com/sm-artworks/be75b541-e429-4b61-a058-6a04bc35f712/customer_file_small.png'
 
 async function setupContactCard(): Promise<void> {
   if (!config.fromPhone || !config.token) return
