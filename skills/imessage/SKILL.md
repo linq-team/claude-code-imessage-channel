@@ -12,6 +12,7 @@ You have access to iMessage via the Linq API. You can:
 5. **Effects** — add iMessage effects to reply or send with the optional `effect` parameter:
    - Screen: `confetti`, `fireworks`, `lasers`, `sparkles`, `celebration`, `hearts`, `love`, `balloons`, `happy_birthday`, `echo`, `spotlight`
    - Bubble: `slam`, `loud`, `gentle`, `invisible`
+6. **Threading** — reply to a specific message by passing `reply_to` (message ID) in the `reply` tool. The message_id is available in the channel event metadata.
 
 When channel events arrive as `<channel source="imessage">`, respond naturally and concisely - this is iMessage, keep it brief.
 

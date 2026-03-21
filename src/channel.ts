@@ -181,6 +181,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           chat_id: { type: 'string', description: 'Chat ID from the inbound message' },
           text: { type: 'string', description: 'Message to send' },
           effect: { type: 'string', description: 'Optional iMessage effect. Screen: confetti, fireworks, lasers, sparkles, celebration, hearts, love, balloons, happy_birthday, echo, spotlight. Bubble: slam, loud, gentle, invisible.' },
+          reply_to: { type: 'string', description: 'Optional message ID to reply to, creating a threaded conversation' },
         },
         required: ['chat_id', 'text'],
       },
@@ -263,12 +264,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args } = req.params
 
   if (name === 'reply') {
-    const { chat_id, text, effect } = args as { chat_id: string; text: string; effect?: string }
+    const { chat_id, text, effect, reply_to } = args as { chat_id: string; text: string; effect?: string; reply_to?: string }
     try {
       await stopTyping(chat_id)
       const bubbleEffects = ['slam', 'loud', 'gentle', 'invisible']
       const message: any = { parts: [{ type: 'text', value: text }], preferred_service: 'iMessage' }
       if (effect) message.effect = { name: effect, type: bubbleEffects.includes(effect) ? 'bubble' : 'screen' }
+      if (reply_to) message.reply_to = { message_id: reply_to }
       const resp = await linqApiCall(`chats/${chat_id}/messages`, { message })
       if (!resp.ok) {
         const err = await resp.text()
