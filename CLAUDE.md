@@ -8,8 +8,10 @@ When enabled as a channel, this plugin bridges iMessage and your Claude Code ses
 
 - Polls the Linq API for new inbound iMessages every 3 seconds
 - Pushes them into the Claude Code session as `<channel>` events
-- Exposes `reply`, `send`, `react`, and `edit_message` tools for Claude to respond via iMessage
+- Downloads inbound photos to `~/.claude/channels/imessage/inbox/`
+- Exposes tools for Claude to reply, send, react, edit, and attach files via iMessage
 - Auto-sends read receipts and typing indicators
+- Tries iMessage first, falls back to SMS/RCS automatically
 
 ## Channel Events
 
@@ -18,14 +20,16 @@ Messages arrive as:
 <channel source="imessage" sender="+1..." chat_id="...">message text</channel>
 ```
 
+If the message has a photo, `image_path` is included in the meta — use `Read` to view it.
+
 ## Tools
 
 | Tool | Description |
 |------|-------------|
-| `reply` | Reply to an inbound iMessage (pass `chat_id` from the channel event) |
-| `send` | Send an iMessage to any phone number |
-| `react` | React with a tapback (like, love, laugh, dislike, emphasis, question) |
-| `edit_message` | Edit a previously sent message (for streaming progress updates) |
+| `reply` | Reply to an inbound iMessage. Optional: `effect`, `reply_to`, `files` (absolute paths). |
+| `send` | Send an iMessage to any phone number. Optional: `effect`, `files`. |
+| `react` | Tapback reaction: `like`, `love`, `laugh`, `dislike`, `emphasize`, `question`. |
+| `edit_message` | Edit a previously sent message (for streaming progress updates). |
 
 ## Configuration
 
@@ -33,14 +37,12 @@ Credentials are stored in `~/.claude/channels/imessage/.env`:
 
 - `LINQ_TOKEN` - Linq API token (required)
 - `LINQ_FROM_PHONE` - Your Linq phone number (required)
-- `LINQ_DEFAULT_RECIPIENT` - Phone number to text on startup
-- `LINQ_ALLOWED_SENDERS` - Comma-separated allowlist of phone numbers
 
-Use `/imessage:configure` to manage credentials.
+Access control is in `~/.claude/channels/imessage/access.json`. Use `/imessage:access` to manage.
 
 ## Setup
 
-1. Install the plugin: `/plugin install imessage@linq-team-claude-code-imessage-channel`
-2. Configure token: `/imessage:configure <your-token>`
-3. Configure phone: `/imessage:configure <your-linq-number>`
-4. Start Claude Code with `--channels plugin:imessage@linq-team-claude-code-imessage-channel`
+1. Add marketplace: `/plugin marketplace add linq-team/claude-code-imessage-channel`
+2. Install: `/plugin install imessage@linq`
+3. Configure: `/imessage:configure <token>` then `/imessage:configure <phone>`
+4. Launch: `claude --dangerously-load-development-channels plugin:imessage@linq`

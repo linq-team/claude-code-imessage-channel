@@ -57,7 +57,7 @@ Set `defaultRecipient` — the number Claude texts on startup to confirm the con
 
 ### `set <key> <value>`
 Set a delivery config key. Valid keys:
-- **ackReaction** — tapback sent on message receipt. Values: `like`, `love`, `laugh`, `dislike`, `emphasis`, `question`. Empty string `""` disables.
+- **ackReaction** — tapback sent on message receipt. Values: `like`, `love`, `laugh`, `dislike`, `emphasize`, `question`. Empty string `""` disables.
 - **pollInterval** — polling interval in ms (default 3000).
 
 ### `clear`
