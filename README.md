@@ -266,6 +266,47 @@ claude-code-imessage-channel/
 - Claude Code v2.1.80+ with channels support
 - A [Linq](https://linqapp.com) account with an API token and phone number
 
+## Contributing
+
+We use a PR workflow with `dev` as the working branch.
+
+```bash
+# Clone and set up
+git clone https://github.com/linq-team/claude-code-imessage-channel.git
+cd claude-code-imessage-channel
+git checkout dev
+npm install
+
+# Create a feature branch
+git checkout -b feat/my-feature
+
+# Make changes, build, test
+npm run build
+
+# Push and open PR against dev
+git push origin feat/my-feature
+# Then open PR on GitHub: base=dev
+```
+
+### Branch strategy
+
+| Branch | Purpose |
+|--------|---------|
+| `main` | Production. Protected - requires 1 review. Only merged from `dev`. |
+| `dev` | Working branch. PRs merge here first. |
+| `feat/*` | Feature branches off `dev`. |
+| `fix/*` | Bug fixes off `dev`. |
+
+### Commit messages
+
+Use conventional commits: `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`, `test:`
+
+### Before submitting a PR
+
+1. `npm run build` passes
+2. No secrets or PII in the diff
+3. README updated if you added/changed config or features
+
 ## License
 
 MIT
