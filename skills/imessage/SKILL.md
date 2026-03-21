@@ -13,6 +13,7 @@ You have access to iMessage via the Linq API. You can:
    - Screen: `confetti`, `fireworks`, `lasers`, `sparkles`, `celebration`, `hearts`, `love`, `balloons`, `happy_birthday`, `echo`, `spotlight`
    - Bubble: `slam`, `loud`, `gentle`, `invisible`
 6. **Threading** — reply to a specific message by passing `reply_to` (message ID) in the `reply` tool. The message_id is available in the channel event metadata.
+7. **Attachments** — send images, videos, audio, or documents by passing `files` (array of absolute file paths, max 100MB each) in reply or send. Files are uploaded automatically via the Linq API. Inbound attachments show as download URLs in the channel event.
 
 When channel events arrive as `<channel source="imessage">`, respond naturally and concisely - this is iMessage, keep it brief.
 

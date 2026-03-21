@@ -22,6 +22,7 @@ import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
 
+
 // --- Configuration ---
 
 interface ChannelConfig {
@@ -162,6 +163,8 @@ When you receive a message:
 - For longer tasks, stream your progress: send a short initial message with reply (e.g. "On it..."), then call edit_message with the message_id to update it as you work. The message edits in-place on their phone.
 - You can also send messages to new numbers using the send tool
 - Read receipts and typing indicators are sent automatically
+- If the channel event meta has an image_path attribute, Read that file — it is a photo the sender attached. Respond about what you see.
+- For non-image attachments, the meta will contain attachment details with local file paths you can Read.
 
 The person texting you is your operator. Follow their instructions. Be concise in replies - this is iMessage, not email.
 Your iMessage number: ${config.fromPhone}`,
@@ -182,6 +185,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           text: { type: 'string', description: 'Message to send' },
           effect: { type: 'string', description: 'Optional iMessage effect. Screen: confetti, fireworks, lasers, sparkles, celebration, hearts, love, balloons, happy_birthday, echo, spotlight. Bubble: slam, loud, gentle, invisible.' },
           reply_to: { type: 'string', description: 'Optional message ID to reply to, creating a threaded conversation' },
+          files: { type: 'array', items: { type: 'string' }, description: 'Optional absolute file paths to attach. Images, videos, audio, documents supported. Max 100MB each.' },
         },
         required: ['chat_id', 'text'],
       },
@@ -220,6 +224,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           to: { type: 'string', description: 'Phone number (e.g. +1XXXXXXXXXX)' },
           text: { type: 'string', description: 'Message to send' },
           effect: { type: 'string', description: 'Optional iMessage effect. Screen: confetti, fireworks, lasers, sparkles, celebration, hearts, love, balloons, happy_birthday, echo, spotlight. Bubble: slam, loud, gentle, invisible.' },
+          files: { type: 'array', items: { type: 'string' }, description: 'Optional absolute file paths to attach. Images, videos, audio, documents supported. Max 100MB each.' },
         },
         required: ['to', 'text'],
       },
@@ -236,6 +241,47 @@ async function linqApiCall(endpoint: string, body: object, method = 'POST'): Pro
     },
     body: JSON.stringify(body),
   })
+}
+
+// --- File upload helper ---
+
+const MIME_TYPES: Record<string, string> = {
+  '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png', '.gif': 'image/gif',
+  '.heic': 'image/heic', '.heif': 'image/heif', '.tiff': 'image/tiff', '.bmp': 'image/bmp',
+  '.mp4': 'video/mp4', '.mov': 'video/quicktime', '.mpeg': 'video/mpeg',
+  '.mp3': 'audio/mpeg', '.m4a': 'audio/mp4', '.wav': 'audio/wav', '.aac': 'audio/aac',
+  '.pdf': 'application/pdf', '.txt': 'text/plain', '.csv': 'text/csv', '.html': 'text/html',
+  '.doc': 'application/msword', '.zip': 'application/zip',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  '.pptx': 'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+}
+
+async function uploadFile(filePath: string): Promise<string> {
+  const ext = path.extname(filePath).toLowerCase()
+  const contentType = MIME_TYPES[ext] || 'application/octet-stream'
+  const filename = path.basename(filePath)
+  const stat = fs.statSync(filePath)
+
+  // Step 1: Get presigned upload URL
+  const createResp = await linqApiCall('attachments', {
+    filename,
+    content_type: contentType,
+    size_bytes: stat.size,
+  })
+  if (!createResp.ok) throw new Error(`Failed to create attachment: ${await createResp.text()}`)
+  const { attachment_id, upload_url, required_headers } = await createResp.json() as any
+
+  // Step 2: Upload file bytes
+  const fileBuffer = fs.readFileSync(filePath)
+  const uploadResp = await fetch(upload_url, {
+    method: 'PUT',
+    headers: required_headers,
+    body: fileBuffer,
+  })
+  if (!uploadResp.ok) throw new Error(`Failed to upload file: ${uploadResp.status}`)
+
+  return attachment_id
 }
 
 // Auto read receipt + typing indicator helpers
@@ -264,11 +310,18 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args } = req.params
 
   if (name === 'reply') {
-    const { chat_id, text, effect, reply_to } = args as { chat_id: string; text: string; effect?: string; reply_to?: string }
+    const { chat_id, text, effect, reply_to, files } = args as { chat_id: string; text: string; effect?: string; reply_to?: string; files?: string[] }
     try {
       await stopTyping(chat_id)
       const bubbleEffects = ['slam', 'loud', 'gentle', 'invisible']
-      const message: any = { parts: [{ type: 'text', value: text }], preferred_service: 'iMessage' }
+      const parts: any[] = [{ type: 'text', value: text }]
+      if (files) {
+        for (const filePath of files) {
+          const attachmentId = await uploadFile(filePath)
+          parts.push({ type: 'media', attachment_id: attachmentId })
+        }
+      }
+      const message: any = { parts, preferred_service: 'iMessage' }
       if (effect) message.effect = { name: effect, type: bubbleEffects.includes(effect) ? 'bubble' : 'screen' }
       if (reply_to) message.reply_to = { message_id: reply_to }
       const resp = await linqApiCall(`chats/${chat_id}/messages`, { message })
@@ -324,10 +377,17 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
 
   if (name === 'send') {
-    const { to, text, effect } = args as { to: string; text: string; effect?: string }
+    const { to, text, effect, files } = args as { to: string; text: string; effect?: string; files?: string[] }
     try {
       const bubbleEffects = ['slam', 'loud', 'gentle', 'invisible']
-      const message: any = { parts: [{ type: 'text', value: text }], preferred_service: 'iMessage' }
+      const parts: any[] = [{ type: 'text', value: text }]
+      if (files) {
+        for (const filePath of files) {
+          const attachmentId = await uploadFile(filePath)
+          parts.push({ type: 'media', attachment_id: attachmentId })
+        }
+      }
+      const message: any = { parts, preferred_service: 'iMessage' }
       if (effect) message.effect = { name: effect, type: bubbleEffects.includes(effect) ? 'bubble' : 'screen' }
       const resp = await linqApiCall('chats', {
         to: [to],
@@ -393,9 +453,45 @@ async function pollForMessages(): Promise<void> {
         const startTime = new Date(lastPollTime)
         if (msgTime < startTime) continue
 
-        // Text is in parts[0].value, not msg.text
-        const messageText = msg.parts?.[0]?.value || msg.text || ''
-        if (!messageText) continue
+        // Extract text and media from message parts
+        let messageText = ''
+        const attachments: { id: string; filename: string; mime_type: string; localPath?: string }[] = []
+        const inboxDir = path.join(CHANNEL_DIR, 'inbox')
+        for (const part of (msg.parts || [])) {
+          if (part.type === 'text') messageText = part.value || ''
+          if (part.type === 'media' && part.id) {
+            const filename = part.filename || `${part.id}.bin`
+            try {
+              const attResp = await fetch(`${config.apiUrl}/attachments/${part.id}`, {
+                headers: { 'Authorization': `Bearer ${config.token}` },
+                signal: AbortSignal.timeout(5000),
+              })
+              if (attResp.ok) {
+                const attData = await attResp.json() as any
+                let localPath: string | undefined
+                if (attData.download_url) {
+                  try {
+                    fs.mkdirSync(inboxDir, { recursive: true })
+                    const dlResp = await fetch(attData.download_url, { signal: AbortSignal.timeout(15000) })
+                    if (dlResp.ok) {
+                      const buffer = Buffer.from(await dlResp.arrayBuffer())
+                      localPath = path.join(inboxDir, filename)
+                      fs.writeFileSync(localPath, buffer)
+                    }
+                  } catch (e: any) {
+                  }
+                }
+                attachments.push({ id: part.id, filename, mime_type: part.mime_type || 'unknown', localPath })
+              } else {
+                attachments.push({ id: part.id, filename, mime_type: part.mime_type || 'unknown' })
+              }
+            } catch (e: any) {
+              attachments.push({ id: part.id, filename, mime_type: part.mime_type || 'unknown' })
+            }
+          }
+        }
+        messageText = messageText || msg.text || ''
+        if (!messageText && attachments.length === 0) continue
 
         // Extract sender
         const sender = msg.from || msg.from_handle?.handle || chat.handles?.find((h: any) => !h.is_me)?.handle || ''
@@ -442,20 +538,30 @@ async function pollForMessages(): Promise<void> {
         markRead(chatId)
         startTyping(chatId)
 
-        // Push to Claude Code
+
+        // Push to Claude Code — image_path goes in meta, not content (prevents forgery)
+        const imagePaths = attachments.filter(a => a.localPath && a.mime_type.startsWith('image/')).map(a => a.localPath!)
         await mcp.notification({
           method: 'notifications/claude/channel',
           params: {
-            content: messageText,
+            content: messageText || (attachments.length > 0 ? '(attachment)' : ''),
             meta: {
               sender,
               chat_id: chatId,
               message_id: msg.id,
+              ...(imagePaths.length === 1 && { image_path: imagePaths[0] }),
+              ...(imagePaths.length > 1 && { image_paths: imagePaths }),
+              ...(attachments.filter(a => !a.mime_type.startsWith('image/')).length > 0 && {
+                attachments: attachments.filter(a => !a.mime_type.startsWith('image/')).map(a => ({
+                  filename: a.filename,
+                  mime_type: a.mime_type,
+                  ...(a.localPath && { path: a.localPath }),
+                })),
+              }),
             },
           },
         })
-
-        console.error(`[imessage] ${sender}: ${messageText.substring(0, 80)}`)
+        console.error(`[imessage] ${sender}: ${messageText.substring(0, 80)}${attachments.length > 0 ? ` [${attachments.length} attachment(s)]` : ''}`)
       }
     }
 
