@@ -265,7 +265,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     try {
       await stopTyping(chat_id)
       const resp = await linqApiCall(`chats/${chat_id}/messages`, {
-        message: { parts: [{ type: 'text', value: text }] },
+        message: { parts: [{ type: 'text', value: text }], preferred_service: 'iMessage' },
       })
       if (!resp.ok) {
         const err = await resp.text()
@@ -324,7 +324,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       const resp = await linqApiCall('chats', {
         to: [to],
         from: config.fromPhone,
-        message: { parts: [{ type: 'text', value: text }] },
+        message: { parts: [{ type: 'text', value: text }], preferred_service: 'iMessage' },
       })
       if (!resp.ok) {
         const err = await resp.text()
