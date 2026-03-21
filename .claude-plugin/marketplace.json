@@ -1,5 +1,6 @@
 {
   "name": "linq",
+  "description": "Text your Claude Code from iMessage. Messaging plugin powered by the Linq API.",
   "owner": {
     "name": "Linq Team",
     "url": "https://linqapp.com"
