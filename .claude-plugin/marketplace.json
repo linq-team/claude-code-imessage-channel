@@ -7,11 +7,13 @@
   "plugins": [
     {
       "name": "imessage",
-      "description": "iMessage channel for Claude Code. Text your AI from your phone via iMessage, powered by Linq.",
+      "description": "iMessage messaging bridge powered by Linq with built-in access control. Manage pairing, allowlists, and policy via /imessage:access.",
+      "category": "productivity",
       "source": {
         "source": "url",
         "url": "https://github.com/linq-team/claude-code-imessage-channel.git"
-      }
+      },
+      "homepage": "https://github.com/linq-team/claude-code-imessage-channel"
     }
   ]
 }

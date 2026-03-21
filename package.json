@@ -1,7 +1,7 @@
 {
   "name": "claude-code-imessage-channel",
   "version": "0.2.0",
-  "description": "iMessage channel for Claude Code — text your AI assistant via iMessage, powered by Linq",
+  "description": "iMessage messaging bridge powered by Linq with built-in access control. Manage pairing, allowlists, and policy via /imessage:access.",
   "type": "module",
   "main": "dist/channel.js",
   "scripts": {
