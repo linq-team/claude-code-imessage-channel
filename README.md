@@ -15,7 +15,26 @@ Default pairing flow for a single-user setup. See [Access Control](#access--deli
 
 ### 1. Get a Linq number
 
-Get your token from the [Linq dashboard](https://zero.linqapp.com/api-tooling/), or run `linq signup` for a free sandbox number (3hr expiry, GitHub auth).
+You need a Linq API token and phone number. Two options:
+
+**Option A: Free sandbox (recommended for trying it out)**
+
+Install the [Linq CLI](https://github.com/linq-team/linq-cli) and sign up for a sandbox number (3hr expiry, authenticates via GitHub):
+
+```bash
+# Install the CLI
+curl -fsSL https://raw.githubusercontent.com/linq-team/linq-cli/main/install.sh | sh
+
+# Sign up — opens browser for GitHub auth, provisions a sandbox number
+linq signup
+
+# See your token and phone number
+linq profile
+```
+
+**Option B: Existing Linq account**
+
+Get your token from the [Linq dashboard](https://zero.linqapp.com/api-tooling/). Your phone number is listed under your account.
 
 ### 2. Install the plugin
 
