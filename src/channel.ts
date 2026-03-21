@@ -7,14 +7,10 @@
  * into your Claude Code session. Claude replies back via iMessage.
  *
  * Setup:
- *   1. Get a Linq API token from https://zero.linqapp.com/api-tooling/
- *   2. Set LINQ_TOKEN and LINQ_FROM_PHONE environment variables
- *   3. Create a webhook subscription pointing to this server's port
- *   4. Start Claude Code with --dangerously-load-development-channels server:imessage
- *
- * Architecture:
- *   iMessage -> Linq -> webhook POST -> this server -> Claude Code session
- *   Claude reply -> Linq API -> iMessage -> your phone
+ *   /plugin install imessage@linq-team-claude-code-imessage-channel
+ *   /imessage:configure <token>
+ *   /imessage:configure <phone>
+ *   claude --channels plugin:imessage@linq-team-claude-code-imessage-channel
  */
 import { Server } from '@modelcontextprotocol/sdk/server/index.js'
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js'
@@ -37,24 +33,103 @@ interface ChannelConfig {
   allowedSenders: Set<string>
 }
 
+interface AccessConfig {
+  dmPolicy: 'pairing' | 'allowlist' | 'open' | 'disabled'
+  allowFrom: string[]
+  defaultRecipient?: string
+  pendingPairings: Record<string, { phone: string; createdAt: string }>
+  ackReaction?: string
+  pollInterval?: number
+}
+
+const ACCESS_FILE = path.join(process.env.HOME || '', '.claude', 'channels', 'imessage', 'access.json')
+
+function loadAccessConfig(): AccessConfig {
+  try {
+    const raw = JSON.parse(fs.readFileSync(ACCESS_FILE, 'utf-8'))
+    return {
+      dmPolicy: raw.dmPolicy || 'pairing',
+      allowFrom: raw.allowFrom || [],
+      defaultRecipient: raw.defaultRecipient,
+      pendingPairings: raw.pendingPairings || {},
+      ackReaction: raw.ackReaction,
+      pollInterval: raw.pollInterval,
+    }
+  } catch {
+    return { dmPolicy: 'pairing', allowFrom: [], pendingPairings: {} }
+  }
+}
+
+function saveAccessConfig(access: AccessConfig): void {
+  const dir = path.dirname(ACCESS_FILE)
+  fs.mkdirSync(dir, { recursive: true })
+  fs.writeFileSync(ACCESS_FILE, JSON.stringify(access, null, 2) + '\n')
+}
+
+function generatePairingCode(): string {
+  return Math.random().toString(36).substring(2, 8)
+}
+
+const CHANNEL_DIR = path.join(process.env.HOME || '', '.claude', 'channels', 'imessage')
+
+function parseEnvFile(filePath: string): Record<string, string> {
+  const vars: Record<string, string> = {}
+  try {
+    const lines = fs.readFileSync(filePath, 'utf-8').split('\n')
+    for (const line of lines) {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) continue
+      const eq = trimmed.indexOf('=')
+      if (eq === -1) continue
+      vars[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim()
+    }
+  } catch {}
+  return vars
+}
+
 function loadChannelConfig(): ChannelConfig {
-  // Try config file first, then env vars
+  // Priority: env vars > ~/.claude/channels/imessage/.env + config.json > ~/.linq/config.json (legacy)
   let token = process.env.LINQ_TOKEN || ''
   let fromPhone = process.env.LINQ_FROM_PHONE || ''
   let apiUrl = process.env.LINQ_API_URL || 'https://api.linqapp.com/v3'
+  let defaultRecipient = process.env.LINQ_DEFAULT_RECIPIENT || ''
+  let allowedSenders = process.env.LINQ_ALLOWED_SENDERS || ''
 
-  const configPath = path.join(process.env.HOME || '', '.linq', 'config.json')
-  if (fs.existsSync(configPath)) {
-    try {
-      const raw = JSON.parse(fs.readFileSync(configPath, 'utf-8'))
-      const profileName = process.env.LINQ_PROFILE || raw.profile || 'default'
-      const profile = raw.profiles?.[profileName]
-      if (profile) {
-        token = token || profile.token || ''
-        fromPhone = fromPhone || profile.fromPhone || ''
-        if (profile.apiUrl) apiUrl = profile.apiUrl
-      }
-    } catch {}
+  // Read from ~/.claude/channels/imessage/
+  const envVars = parseEnvFile(path.join(CHANNEL_DIR, '.env'))
+  token = token || envVars.LINQ_TOKEN || ''
+  fromPhone = fromPhone || envVars.LINQ_FROM_PHONE || ''
+  if (envVars.LINQ_API_URL) apiUrl = envVars.LINQ_API_URL
+  defaultRecipient = defaultRecipient || envVars.LINQ_DEFAULT_RECIPIENT || ''
+  allowedSenders = allowedSenders || envVars.LINQ_ALLOWED_SENDERS || ''
+
+  // Read optional config.json for non-secret settings
+  const configJsonPath = path.join(CHANNEL_DIR, 'config.json')
+  try {
+    const cfg = JSON.parse(fs.readFileSync(configJsonPath, 'utf-8'))
+    defaultRecipient = defaultRecipient || cfg.defaultRecipient || ''
+    allowedSenders = allowedSenders || (cfg.allowedSenders || []).join(',')
+    if (cfg.apiUrl) apiUrl = cfg.apiUrl
+  } catch {}
+
+  // Legacy fallback: ~/.linq/config.json
+  if (!token || !fromPhone) {
+    const legacyPath = path.join(process.env.HOME || '', '.linq', 'config.json')
+    if (fs.existsSync(legacyPath)) {
+      try {
+        const raw = JSON.parse(fs.readFileSync(legacyPath, 'utf-8'))
+        const profileName = process.env.LINQ_PROFILE || raw.profile || 'default'
+        const profile = raw.profiles?.[profileName]
+        if (profile) {
+          if (!token && profile.token) {
+            token = profile.token
+            console.error('[imessage] using legacy ~/.linq/config.json — run /imessage:configure to migrate')
+          }
+          fromPhone = fromPhone || profile.fromPhone || ''
+          defaultRecipient = defaultRecipient || profile.defaultRecipient || ''
+        }
+      } catch {}
+    }
   }
 
   return {
@@ -62,10 +137,8 @@ function loadChannelConfig(): ChannelConfig {
     fromPhone,
     apiUrl,
     webhookPort: parseInt(process.env.LINQ_CHANNEL_PORT || '9998', 10),
-    defaultRecipient: process.env.LINQ_DEFAULT_RECIPIENT || '',
-    allowedSenders: new Set(
-      (process.env.LINQ_ALLOWED_SENDERS || '').split(',').filter(Boolean)
-    ),
+    defaultRecipient,
+    allowedSenders: new Set(allowedSenders.split(',').filter(Boolean)),
   }
 }
 
@@ -317,10 +390,42 @@ async function pollForMessages(): Promise<void> {
         // Extract sender
         const sender = msg.from || msg.from_handle?.handle || chat.handles?.find((h: any) => !h.is_me)?.handle || ''
 
-        // Sender gating
-        if (config.allowedSenders.size > 0 && !config.allowedSenders.has(sender)) {
-          console.error(`[imessage] Dropped message from ${sender} (not in allowlist)`)
+        // Access control — re-read on every message so skill changes take effect live
+        const access = loadAccessConfig()
+
+        if (access.dmPolicy === 'disabled') {
+          console.error(`[imessage] Dropped (policy: disabled)`)
           continue
+        }
+
+        const isAllowed = access.dmPolicy === 'open' ||
+          access.allowFrom.includes(sender) ||
+          (config.allowedSenders.size > 0 && config.allowedSenders.has(sender))
+
+        if (!isAllowed) {
+          if (access.dmPolicy === 'pairing') {
+            // Generate pairing code and reply
+            const code = generatePairingCode()
+            access.pendingPairings[code] = { phone: sender, createdAt: new Date().toISOString() }
+            saveAccessConfig(access)
+            // Reply with pairing code via Linq API
+            try {
+              await linqApiCall(`chats/${chatId}/messages`, {
+                message: { parts: [{ type: 'text', value: `Pairing code: ${code}\nGive this to the Claude Code operator to approve your access.` }] },
+              })
+            } catch {}
+            console.error(`[imessage] Pairing code ${code} sent to ${sender}`)
+          } else {
+            console.error(`[imessage] Dropped message from ${sender} (not in allowlist)`)
+          }
+          continue
+        }
+
+        // Ack reaction
+        if (access.ackReaction && msg.id) {
+          try {
+            await linqApiCall(`chats/${chatId}/messages/${msg.id}/react`, { reaction: access.ackReaction })
+          } catch {}
         }
 
         // Auto read receipt + typing indicator
@@ -430,9 +535,10 @@ const webhookServer = http.createServer(async (req, res) => {
     if (!messageText) { res.writeHead(200); res.end('ok'); return }
     if (messageId) seenMessageIds.add(messageId) // prevent duplicate from polling
 
-    if (config.allowedSenders.size > 0 && !config.allowedSenders.has(sender)) {
-      res.writeHead(200); res.end('ok'); return
-    }
+    const access = loadAccessConfig()
+    if (access.dmPolicy === 'disabled') { res.writeHead(200); res.end('ok'); return }
+    const isAllowed = access.dmPolicy === 'open' || access.allowFrom.includes(sender)
+    if (!isAllowed) { res.writeHead(200); res.end('ok'); return }
 
     if (chatId) { markRead(chatId); startTyping(chatId) }
 
@@ -452,55 +558,65 @@ const webhookServer = http.createServer(async (req, res) => {
   res.end('ok')
 })
 
-webhookServer.listen(config.webhookPort, '127.0.0.1', () => {
-  console.error(`[imessage] Channel ready`)
-  console.error(`[imessage]   Polling: every ${POLL_INTERVAL}ms`)
-  console.error(`[imessage]   Webhook: http://127.0.0.1:${config.webhookPort} (fallback)`)
-  console.error(`[imessage]   From:    ${config.fromPhone}`)
-  console.error(`[imessage]   API:     ${config.apiUrl}`)
-  if (config.allowedSenders.size > 0) {
-    console.error(`[imessage]   Allowed: ${[...config.allowedSenders].join(', ')}`)
+webhookServer.on('error', (err: any) => {
+  if (err.code === 'EADDRINUSE') {
+    console.error(`[imessage]   Webhook: port ${config.webhookPort} in use, skipping (polling still active)`)
+  } else {
+    console.error(`[imessage]   Webhook error: ${err.message}`)
   }
-
-  // Auto-setup contact card (name: "Claude Code", logo)
-  setupContactCard()
-
-  // Start polling loop
-  setInterval(pollForMessages, POLL_INTERVAL)
-  console.error(`[imessage]   Polling started`)
-
-  // Notify Claude that the channel is ready - greet the user via iMessage
-  setTimeout(async () => {
-    const allowedList = [...config.allowedSenders]
-    const recipient = config.defaultRecipient || (allowedList.length > 0 ? allowedList[0] : '')
-    if (recipient) {
-      await mcp.notification({
-        method: 'notifications/claude/channel',
-        params: {
-          content: `Channel connected. Send a greeting NOW by calling the send tool with to="${recipient}" and a brief message like "Hey, Claude Code is online. Text me anything."`,
-          meta: {
-            sender: 'system',
-            event_type: 'channel_ready',
-            recipient,
-          },
-        },
-      })
-    } else if (!config.token || !config.fromPhone) {
-      await mcp.notification({
-        method: 'notifications/claude/channel',
-        params: {
-          content: 'Channel connected but Linq is not configured. Walk the user through setup:\n1. Check if linq CLI is installed: `which linq`\n2. If not: `curl -fsSL https://raw.githubusercontent.com/linq-team/linq-cli/main/install.sh | sh`\n3. Run: `linq signup` (GitHub auth, provisions sandbox number)\n4. Run: `linq profile` to get token and phone number\n5. Write ~/.linq/config.json with their credentials\n6. Ask for their personal phone number to text them\nOr they can run /imessage:configure for guided setup.',
-          meta: { sender: 'system', event_type: 'setup_required' },
-        },
-      })
-    } else {
-      await mcp.notification({
-        method: 'notifications/claude/channel',
-        params: {
-          content: 'Channel connected but no recipient phone number is configured. Ask the user: "What\'s your phone number? I\'ll text you to confirm the connection." Then use the send tool with their number. Remember the number for future messages.',
-          meta: { sender: 'system', event_type: 'channel_ready_no_recipient' },
-        },
-      })
-    }
-  }, 2000)
 })
+
+webhookServer.listen(config.webhookPort, '127.0.0.1', () => {
+  console.error(`[imessage]   Webhook: http://127.0.0.1:${config.webhookPort} (fallback)`)
+})
+
+// --- Startup (runs regardless of webhook) ---
+
+const startupAccess = loadAccessConfig()
+
+console.error(`[imessage] Channel ready`)
+console.error(`[imessage]   Policy:  ${startupAccess.dmPolicy}`)
+console.error(`[imessage]   Polling: every ${startupAccess.pollInterval || POLL_INTERVAL}ms`)
+console.error(`[imessage]   From:    ${config.fromPhone}`)
+console.error(`[imessage]   API:     ${config.apiUrl}`)
+if (startupAccess.allowFrom.length > 0) {
+  console.error(`[imessage]   Allowed: ${startupAccess.allowFrom.join(', ')}`)
+}
+
+setupContactCard()
+
+setInterval(pollForMessages, startupAccess.pollInterval || POLL_INTERVAL)
+console.error(`[imessage]   Polling started`)
+
+setTimeout(async () => {
+  const recipient = config.defaultRecipient || startupAccess.defaultRecipient || (startupAccess.allowFrom.length > 0 ? startupAccess.allowFrom[0] : '')
+  if (recipient) {
+    await mcp.notification({
+      method: 'notifications/claude/channel',
+      params: {
+        content: `Channel connected. Send a greeting NOW by calling the send tool with to="${recipient}" and a brief message like "Hey, Claude Code is online. Text me anything."`,
+        meta: {
+          sender: 'system',
+          event_type: 'channel_ready',
+          recipient,
+        },
+      },
+    })
+  } else if (!config.token || !config.fromPhone) {
+    await mcp.notification({
+      method: 'notifications/claude/channel',
+      params: {
+        content: 'Channel connected but Linq is not configured. Tell the user to run:\n1. /imessage:configure <token> — set their Linq API token\n2. /imessage:configure <phone> — set their Linq phone number\nGet a token at https://zero.linqapp.com/api-tooling/ or run `linq signup` for a sandbox.',
+        meta: { sender: 'system', event_type: 'setup_required' },
+      },
+    })
+  } else {
+    await mcp.notification({
+      method: 'notifications/claude/channel',
+      params: {
+        content: 'Channel connected but no recipient phone number is configured. Ask the user: "What\'s your phone number? I\'ll text you to confirm the connection." Then use the send tool with their number. Remember the number for future messages.',
+        meta: { sender: 'system', event_type: 'channel_ready_no_recipient' },
+      },
+    })
+  }
+}, 2000)

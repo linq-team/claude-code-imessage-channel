@@ -2,6 +2,7 @@
   "name": "imessage",
   "description": "iMessage channel for Claude Code. Text your AI from your phone via iMessage, powered by Linq.",
   "version": "0.1.0",
+  "keywords": ["imessage", "sms", "messaging", "linq", "channel", "mcp"],
   "author": {
     "name": "Linq",
     "url": "https://linqapp.com"

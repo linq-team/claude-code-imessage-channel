@@ -2,7 +2,8 @@
   "mcpServers": {
     "imessage": {
       "command": "node",
-      "args": ["./dist/channel.js"]
+      "args": ["${CLAUDE_PLUGIN_ROOT}/dist/channel.js"],
+      "cwd": "${CLAUDE_PLUGIN_ROOT}"
     }
   }
 }

@@ -1,49 +1,47 @@
 ---
 name: configure
-description: Set up the iMessage channel with your Linq credentials. Run this if you need to configure or reconfigure your token and phone number.
+description: Configure the iMessage channel with your Linq credentials. Accepts a token, phone number, or 'clear' to reset.
 disable-model-invocation: true
 ---
 
 # Configure iMessage Channel
 
-Help the user set up their Linq credentials for the iMessage channel.
+Manage credentials stored in `~/.claude/channels/imessage/.env`.
 
-## If they don't have a Linq account:
+## Parse the argument
 
-1. Check if the `linq` CLI is installed by running `which linq` or `linq --version`
-2. If not installed, tell them to run: `curl -fsSL https://raw.githubusercontent.com/linq-team/linq-cli/main/install.sh | sh`
-3. Then run: `linq signup` (authenticates via GitHub, provisions a sandbox number)
-4. After signup, run: `linq profile` to see their token and phone number
+The user runs `/imessage:configure` with an optional argument. Detect what they passed:
 
-## If they have credentials:
+- **No argument**: Read `~/.claude/channels/imessage/.env` and report status. Show whether `LINQ_TOKEN` and `LINQ_FROM_PHONE` are set (mask the token, show only last 4 chars). If neither is set, guide them to get a token at https://zero.linqapp.com/api-tooling/ or run `linq signup` for a free sandbox.
 
-Write the config file:
+- **`clear`**: Delete `~/.claude/channels/imessage/.env` and confirm credentials removed.
 
-```bash
-mkdir -p ~/.linq
-cat > ~/.linq/config.json << 'EOF'
-{
-  "version": 2,
-  "profile": "default",
-  "profiles": {
-    "default": {
-      "token": "THEIR_TOKEN",
-      "fromPhone": "+1THEIR_LINQ_NUMBER"
-    }
-  }
-}
-EOF
+- **Starts with `+` or is all digits (phone number)**: Normalize to E.164 format (prepend +1 if 10 digits). Write or update `LINQ_FROM_PHONE=<number>` in the `.env` file, preserving other lines.
+
+- **Anything else (token)**: Write or update `LINQ_TOKEN=<value>` in the `.env` file, preserving other lines.
+
+## Writing the .env file
+
+1. Create the directory if it doesn't exist: `mkdir -p ~/.claude/channels/imessage`
+2. Read the existing `.env` file if present
+3. Update or append the relevant line (`LINQ_TOKEN=...` or `LINQ_FROM_PHONE=...`)
+4. Write back with permissions `600`: `chmod 600 ~/.claude/channels/imessage/.env`
+
+## After writing
+
+Report what was saved. If both `LINQ_TOKEN` and `LINQ_FROM_PHONE` are now set, tell the user:
+
+"Credentials saved. Restart Claude Code with the channel flag to connect:"
+```
+claude --channels plugin:imessage@linq-team-claude-code-imessage-channel
 ```
 
-## Then ask for their personal phone number:
+If only one is set, tell them what's still missing.
 
-"What's your phone number? I'll text you to confirm everything works."
+## Setting default recipient
 
-Set it as `LINQ_DEFAULT_RECIPIENT` in the `.mcp.json` env vars, or remember it for the session.
-
-## Restart:
-
-Tell them to restart Claude Code with:
+If the user runs `/imessage:configure recipient +1234567890`, write a `config.json` file at `~/.claude/channels/imessage/config.json`:
+```json
+{ "defaultRecipient": "+1234567890" }
 ```
-claude --dangerously-skip-permissions --dangerously-load-development-channels server:imessage
-```
+This is the number Claude will text on startup to confirm the connection.

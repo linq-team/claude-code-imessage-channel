@@ -1,0 +1,17 @@
+{
+  "name": "linq",
+  "owner": {
+    "name": "Linq Team",
+    "url": "https://linqapp.com"
+  },
+  "plugins": [
+    {
+      "name": "imessage",
+      "description": "iMessage channel for Claude Code. Text your AI from your phone via iMessage, powered by Linq.",
+      "source": {
+        "source": "url",
+        "url": "https://github.com/linq-team/claude-code-imessage-channel.git"
+      }
+    }
+  ]
+}

@@ -6,7 +6,7 @@
   "main": "dist/channel.js",
   "scripts": {
     "build": "tsc",
-    "start": "node dist/channel.js"
+    "start": "npm install --no-summary && node dist/channel.js"
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.12.1"
