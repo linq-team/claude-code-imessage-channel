@@ -198,13 +198,13 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
     },
     {
       name: 'react',
-      description: 'React to a message with a tapback (like, love, dislike, laugh, emphasis, question)',
+      description: 'React to a message with a tapback (like, love, dislike, laugh, emphasize, question)',
       inputSchema: {
         type: 'object' as const,
         properties: {
           chat_id: { type: 'string', description: 'Chat ID' },
           message_id: { type: 'string', description: 'Message ID to react to' },
-          reaction: { type: 'string', description: 'Reaction type: like, love, dislike, laugh, emphasis, question' },
+          reaction: { type: 'string', description: 'Reaction type: like, love, dislike, laugh, emphasize, question' },
         },
         required: ['chat_id', 'message_id', 'reaction'],
       },
@@ -215,7 +215,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
       inputSchema: {
         type: 'object' as const,
         properties: {
-          to: { type: 'string', description: 'Phone number (e.g. +12025551234)' },
+          to: { type: 'string', description: 'Phone number (e.g. +1XXXXXXXXXX)' },
           text: { type: 'string', description: 'Message to send' },
         },
         required: ['to', 'text'],
@@ -303,8 +303,10 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (name === 'react') {
     const { chat_id, message_id, reaction } = args as { chat_id: string; message_id: string; reaction: string }
     try {
-      const resp = await linqApiCall(`chats/${chat_id}/messages/${message_id}/react`, {
-        reaction,
+      const resp = await linqApiCall(`messages/${message_id}/reactions`, {
+        type: reaction,
+        operation: 'add',
+        part_index: 0,
       })
       if (!resp.ok) {
         const err = await resp.text()
@@ -424,7 +426,7 @@ async function pollForMessages(): Promise<void> {
         // Ack reaction
         if (access.ackReaction && msg.id) {
           try {
-            await linqApiCall(`chats/${chatId}/messages/${msg.id}/react`, { reaction: access.ackReaction })
+            await linqApiCall(`messages/${msg.id}/reactions`, { type: access.ackReaction, operation: 'add', part_index: 0 })
           } catch {}
         }
 

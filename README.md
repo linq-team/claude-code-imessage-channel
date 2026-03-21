@@ -1,95 +1,161 @@
 # iMessage Channel for Claude Code
 
-Text your Claude Code session from iMessage. Two-way: you send a text, Claude reads it and replies back via iMessage. Powered by [Linq](https://linqapp.com).
+Connect iMessage to your Claude Code session with an MCP server.
 
-## Demo
-
-```
-You (iMessage):  Hey there claude code
-Claude Code:     ← imessage: Hey there claude code
-                 ● imessage – reply(text: "Hey! What's up?")
-                   └ sent via iMessage
-You (iMessage):  [receives "Hey! What's up?"]
-```
+The MCP server connects to the Linq API and provides tools to Claude to reply, react, or edit messages. When you text the Linq number, the server forwards the message to your Claude Code session.
 
 ## Prerequisites
 
 - [Claude Code](https://claude.ai/code) v2.1.80+
 - [Node.js](https://nodejs.org) >= 22
-- A [Linq](https://linqapp.com) API token and phone number
 
 ## Quick Setup
 
-### 1. Install the plugin
+Default pairing flow for a single-user setup. See [Access Control](#access--delivery) for multi-user and policy options.
+
+### 1. Get a Linq number
+
+Get your token from the [Linq dashboard](https://zero.linqapp.com/api-tooling/), or run `linq signup` for a free sandbox number (3hr expiry, GitHub auth).
+
+### 2. Install the plugin
+
+These are Claude Code commands — run `claude` to start a session first.
 
 ```
 /plugin marketplace add linq-team/claude-code-imessage-channel
 /plugin install imessage@linq
 ```
 
-### 2. Configure
-
-Get your token from the [Linq dashboard](https://zero.linqapp.com/api-tooling/) or run `linq signup` for a free sandbox number.
+### 3. Give the server your credentials
 
 ```
-/imessage:configure <your-token>
+/imessage:configure <your-linq-token>
 /imessage:configure <your-linq-phone-number>
 ```
 
-### 3. Launch with the channel flag
+Writes `LINQ_TOKEN=...` and `LINQ_FROM_PHONE=...` to `~/.claude/channels/imessage/.env`. You can also write that file by hand, or set the variables in your shell environment — shell takes precedence.
+
+### 4. Relaunch with the channel flag
+
+The server won't connect without this — exit your session and start a new one:
 
 ```bash
-claude --channels plugin:imessage@linq
+claude --dangerously-load-development-channels plugin:imessage@linq
 ```
 
-### 4. Set your phone number
+> **Note:** Don't launch from the plugin repo directory — the local `.mcp.json` will conflict. Launch from any other directory (e.g. `~/Desktop`, your project folder, etc.).
 
-So Claude knows who to text on startup:
+### 5. Pair
+
+With Claude Code running from the previous step, text your Linq number from iMessage — you'll get a 6-character pairing code back. In your Claude Code session:
 
 ```
-/imessage:access recipient +1234567890
+/imessage:access pair <code>
+```
+
+Your next text reaches the assistant.
+
+### 6. Lock it down
+
+Pairing is for capturing phone numbers. Once you're in, switch to allowlist so strangers don't get pairing-code replies:
+
+```
+/imessage:access policy allowlist
+```
+
+### Optional: Set a startup greeting
+
+So Claude texts you automatically when it starts:
+
+```
+/imessage:access recipient +1XXXXXXXXXX
 ```
 
 Restart Claude Code with the channel flag. Claude texts you on startup.
 
-## Access Control
+## Access & Delivery
 
-By default, unknown senders trigger a **pairing flow** — they get a 6-character code, and you approve it from your session. Once approved, their messages pass through.
+A Linq number is publicly addressable via iMessage. Anyone who knows the number can text it, and without a gate those messages flow straight into your assistant session. The access model decides who gets through.
 
-All state lives in `~/.claude/channels/imessage/access.json`. The server re-reads it on every inbound message, so changes take effect without a restart.
+By default, a text from an unknown sender triggers **pairing**: the server replies with a 6-character code and drops the message. You run `/imessage:access pair <code>` from your assistant session to approve them. Once approved, their messages pass through.
 
-### Policies
+All state lives in `~/.claude/channels/imessage/access.json`. The `/imessage:access` skill commands edit this file; the server re-reads it on every inbound message, so changes take effect without a restart.
+
+### At a glance
+
+| | |
+|-|-|
+| Default policy | `pairing` |
+| Sender ID | Phone number in E.164 format (e.g. `+1XXXXXXXXXX`) |
+| Config file | `~/.claude/channels/imessage/access.json` |
+
+### DM policies
+
+`dmPolicy` controls how messages from senders not on the allowlist are handled.
 
 | Policy | Behavior |
 |--------|----------|
-| `pairing` (default) | Unknown senders get a pairing code. Approve with `/imessage:access pair <code>`. |
-| `allowlist` | Drop silently. No reply to unknown senders. |
+| `pairing` (default) | Reply with a pairing code, drop the message. Approve with `/imessage:access pair <code>`. |
+| `allowlist` | Drop silently. No reply. Useful if your number is shared and pairing replies would attract spam. |
 | `open` | Anyone can message. No filtering. |
-| `disabled` | Drop everything. |
+| `disabled` | Drop everything, including allowlisted senders. |
+
+```
+/imessage:access policy allowlist
+```
+
+### Phone numbers
+
+iMessage uses phone numbers as identifiers. The allowlist stores E.164 format numbers (e.g. `+1XXXXXXXXXX`). Pairing captures the number automatically.
+
+```
+/imessage:access allow +1XXXXXXXXXX
+/imessage:access remove +1XXXXXXXXXX
+```
+
+### Delivery
+
+Configure inbound behavior with `/imessage:access set <key> <value>`.
+
+**ackReaction** — tapback sent on message receipt. iMessage supports: `like`, `love`, `laugh`, `dislike`, `emphasis`, `question`. Empty string disables.
+
+```
+/imessage:access set ackReaction love
+/imessage:access set ackReaction ""
+```
+
+**pollInterval** — how often the server checks for new messages, in milliseconds. Default `3000`.
+
+```
+/imessage:access set pollInterval 5000
+```
 
 ### Skill reference
 
 | Command | Effect |
 |---------|--------|
 | `/imessage:access` | Print current state: policy, allowlist, pending pairings. |
-| `/imessage:access pair <code>` | Approve pairing code. Adds sender to allowlist. |
-| `/imessage:access deny <code>` | Discard pending code. Sender not notified. |
-| `/imessage:access allow +1234567890` | Add phone number to allowlist. |
-| `/imessage:access remove +1234567890` | Remove from allowlist. |
-| `/imessage:access policy allowlist` | Set policy. Values: `pairing`, `allowlist`, `open`, `disabled`. |
-| `/imessage:access recipient +1234567890` | Set default recipient for startup greeting. |
-| `/imessage:access set ackReaction love` | Tapback on receipt: `like`, `love`, `laugh`, `dislike`, `emphasis`, `question`. |
+| `/imessage:access pair a4f91c` | Approve pairing code. Adds sender to `allowFrom`. |
+| `/imessage:access deny a4f91c` | Discard pending code. Sender not notified. |
+| `/imessage:access allow +1XXXXXXXXXX` | Add a phone number directly. |
+| `/imessage:access remove +1XXXXXXXXXX` | Remove from allowlist. |
+| `/imessage:access policy allowlist` | Set dmPolicy. Values: `pairing`, `allowlist`, `open`, `disabled`. |
+| `/imessage:access recipient +1XXXXXXXXXX` | Set default recipient for startup greeting. |
+| `/imessage:access set ackReaction love` | Set a config key: `ackReaction`, `pollInterval`. |
+| `/imessage:access clear` | Delete access.json, reset to defaults. |
 
 ### Config file
 
-`~/.claude/channels/imessage/access.json`:
+`~/.claude/channels/imessage/access.json`. Absent file is equivalent to `pairing` policy with empty lists, so the first text triggers pairing.
 
 ```json
 {
   "dmPolicy": "pairing",
-  "allowFrom": ["+12025551234"],
-  "defaultRecipient": "+12025551234",
-  "pendingPairings": {},
+  "allowFrom": ["+1XXXXXXXXXX"],
+  "defaultRecipient": "+1XXXXXXXXXX",
+  "pendingPairings": {
+    "a4f91c": { "phone": "+1XXXXXXXXXX", "createdAt": "2026-03-20T..." }
+  },
   "ackReaction": "love",
   "pollInterval": 3000
 }
@@ -108,40 +174,48 @@ Manage with `/imessage:configure`:
 
 | Command | Effect |
 |---------|--------|
-| `/imessage:configure` | Show current status. |
-| `/imessage:configure <token>` | Set API token. |
-| `/imessage:configure +1234567890` | Set Linq phone number. |
+| `/imessage:configure` | Show current status (token set? phone set?). |
+| `/imessage:configure <token>` | Save token to `.env`. |
+| `/imessage:configure +1XXXXXXXXXX` | Save phone number to `.env`. |
 | `/imessage:configure clear` | Remove all credentials. |
 
 Environment variables (`LINQ_TOKEN`, `LINQ_FROM_PHONE`, etc.) override the `.env` file.
 
-## Tools
+## Tools exposed to the assistant
 
-| Tool | Description |
-|------|-------------|
-| `reply` | Reply to an inbound iMessage conversation |
-| `send` | Send an iMessage to any phone number |
-| `react` | Tapback reaction (like, love, laugh, dislike, emphasis, question) |
-| `edit_message` | Edit a previously sent message (for streaming progress updates) |
+| Tool | Purpose |
+|------|---------|
+| `reply` | Reply to an inbound iMessage. Takes `chat_id` + `text`. Returns the sent message ID. |
+| `send` | Send to any phone number. Takes `to` + `text`. |
+| `react` | Tapback reaction to a message by ID. Values: `like`, `love`, `laugh`, `dislike`, `emphasis`, `question`. |
+| `edit_message` | Edit a previously sent message. Useful for "working…" → result progress updates. |
+
+Inbound messages trigger a typing indicator automatically — iMessage shows typing while the assistant works on a response.
+
+## No history or search
+
+The Linq API polls for recent messages but does not expose full chat history or search. The server only sees messages as they arrive — if the assistant needs earlier context, it will ask you to paste or summarize.
 
 ## How It Works
 
 ```
-Your phone → iMessage → Linq → poller → Claude Code session
+Your phone → iMessage → Linq API → poller → Claude Code session
 Claude reply → Linq API → iMessage → your phone
 ```
 
-The channel server polls the Linq API every 3 seconds for new messages. No webhook URL, no ngrok, no port forwarding needed. A webhook listener on port 9998 is available as fallback.
+The channel server polls the Linq API every 3 seconds for new messages (configurable via `pollInterval`). No webhook URL, no ngrok, no port forwarding needed. A webhook listener on port 9998 is available as fallback if you prefer real-time delivery.
+
+When Claude starts, it automatically sets a contact card ("Claude Code" with logo) so recipients see a friendly name in iMessage.
 
 ## Features
 
 - **Two-way iMessage** — text in, get replies back as iMessages
-- **Access control** — pairing flow, allowlist, or open policy
+- **Access control** — pairing flow, allowlist, open, or disabled policy
 - **Read receipts** — auto-sent when your message is received
 - **Typing indicators** — shows typing while Claude processes
 - **Tapback reactions** — Claude can react with like, love, laugh, etc.
 - **Ack reactions** — configurable tapback sent on message receipt
-- **Streaming edits** — send "working..." then update in-place
+- **Streaming edits** — send "working..." then update in-place (iOS 16+)
 - **Contact card** — auto-sets name to "Claude Code" with logo
 - **No ngrok needed** — polling-based, works behind any firewall
 

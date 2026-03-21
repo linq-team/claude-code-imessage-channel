@@ -83,14 +83,14 @@ The server re-reads `access.json` on every inbound message, so changes take effe
   "dmPolicy": "pairing",
 
   // Phone numbers allowed to message. E.164 format.
-  "allowFrom": ["+12025551234"],
+  "allowFrom": ["+1XXXXXXXXXX"],
 
   // Number Claude texts on startup.
-  "defaultRecipient": "+12025551234",
+  "defaultRecipient": "+1XXXXXXXXXX",
 
   // Pending pairing codes. Managed by the channel server, not manually.
   "pendingPairings": {
-    "a4f91c": { "phone": "+14155559876", "createdAt": "2026-03-20T..." }
+    "a4f91c": { "phone": "+1XXXXXXXXXX", "createdAt": "2026-03-20T..." }
   },
 
   // Tapback sent on message receipt. Empty string disables.
@@ -108,9 +108,9 @@ The server re-reads `access.json` on every inbound message, so changes take effe
 | `/imessage:access` | Print current state: policy, allowlist, pending pairings. |
 | `/imessage:access pair a4f91c` | Approve pairing code. Adds sender to `allowFrom`. |
 | `/imessage:access deny a4f91c` | Discard pending code. Sender not notified. |
-| `/imessage:access allow +12025551234` | Add a phone number to allowlist. |
-| `/imessage:access remove +12025551234` | Remove from allowlist. |
+| `/imessage:access allow +1XXXXXXXXXX` | Add a phone number to allowlist. |
+| `/imessage:access remove +1XXXXXXXXXX` | Remove from allowlist. |
 | `/imessage:access policy allowlist` | Set dmPolicy. Values: `pairing`, `allowlist`, `open`, `disabled`. |
-| `/imessage:access recipient +12025551234` | Set default recipient for startup greeting. |
+| `/imessage:access recipient +1XXXXXXXXXX` | Set default recipient for startup greeting. |
 | `/imessage:access set ackReaction love` | Set config key: `ackReaction`, `pollInterval`. |
 | `/imessage:access clear` | Delete access.json, reset to defaults. |
