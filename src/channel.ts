@@ -180,6 +180,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           chat_id: { type: 'string', description: 'Chat ID from the inbound message' },
           text: { type: 'string', description: 'Message to send' },
+          effect: { type: 'string', description: 'Optional iMessage effect. Screen: confetti, fireworks, lasers, sparkles, celebration, hearts, love, balloons, happy_birthday, echo, spotlight. Bubble: slam, loud, gentle, invisible.' },
         },
         required: ['chat_id', 'text'],
       },
@@ -217,6 +218,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
         properties: {
           to: { type: 'string', description: 'Phone number (e.g. +1XXXXXXXXXX)' },
           text: { type: 'string', description: 'Message to send' },
+          effect: { type: 'string', description: 'Optional iMessage effect. Screen: confetti, fireworks, lasers, sparkles, celebration, hearts, love, balloons, happy_birthday, echo, spotlight. Bubble: slam, loud, gentle, invisible.' },
         },
         required: ['to', 'text'],
       },
@@ -261,12 +263,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args } = req.params
 
   if (name === 'reply') {
-    const { chat_id, text } = args as { chat_id: string; text: string }
+    const { chat_id, text, effect } = args as { chat_id: string; text: string; effect?: string }
     try {
       await stopTyping(chat_id)
-      const resp = await linqApiCall(`chats/${chat_id}/messages`, {
-        message: { parts: [{ type: 'text', value: text }], preferred_service: 'iMessage' },
-      })
+      const bubbleEffects = ['slam', 'loud', 'gentle', 'invisible']
+      const message: any = { parts: [{ type: 'text', value: text }], preferred_service: 'iMessage' }
+      if (effect) message.effect = { name: effect, type: bubbleEffects.includes(effect) ? 'bubble' : 'screen' }
+      const resp = await linqApiCall(`chats/${chat_id}/messages`, { message })
       if (!resp.ok) {
         const err = await resp.text()
         return { content: [{ type: 'text' as const, text: `Failed: ${err}` }], isError: true }
@@ -319,12 +322,15 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
 
   if (name === 'send') {
-    const { to, text } = args as { to: string; text: string }
+    const { to, text, effect } = args as { to: string; text: string; effect?: string }
     try {
+      const bubbleEffects = ['slam', 'loud', 'gentle', 'invisible']
+      const message: any = { parts: [{ type: 'text', value: text }], preferred_service: 'iMessage' }
+      if (effect) message.effect = { name: effect, type: bubbleEffects.includes(effect) ? 'bubble' : 'screen' }
       const resp = await linqApiCall('chats', {
         to: [to],
         from: config.fromPhone,
-        message: { parts: [{ type: 'text', value: text }], preferred_service: 'iMessage' },
+        message,
       })
       if (!resp.ok) {
         const err = await resp.text()
