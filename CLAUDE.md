@@ -26,10 +26,12 @@ If the message has a photo, `image_path` is included in the meta — use `Read` 
 
 | Tool | Description |
 |------|-------------|
-| `reply` | Reply to an inbound iMessage. Optional: `effect`, `reply_to`, `files` (absolute paths). |
-| `send` | Send an iMessage to any phone number. Optional: `effect`, `files`. |
+| `reply` | Reply to an inbound iMessage. Optional: `effect`, `reply_to`, `files`, `text_decorations`. |
+| `send` | Send to any phone number. Optional: `effect`, `files`, `text_decorations`. Returns `chat_id` + `message_id`. |
 | `react` | Tapback reaction: `like`, `love`, `laugh`, `dislike`, `emphasize`, `question`. |
 | `edit_message` | Edit a previously sent message (for streaming progress updates). |
+| `send_link` | Send a URL with a rich link preview card. |
+| `check_capability` | Check if a phone number supports iMessage or RCS. |
 
 ## Configuration
 

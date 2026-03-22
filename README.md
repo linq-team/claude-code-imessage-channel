@@ -204,10 +204,12 @@ Environment variables (`LINQ_TOKEN`, `LINQ_FROM_PHONE`, etc.) override the `.env
 
 | Tool | Purpose |
 |------|---------|
-| `reply` | Reply to an inbound iMessage. Takes `chat_id` + `text`. Optional: `effect`, `reply_to`, `files` (absolute paths to attach). Returns the sent message ID. |
-| `send` | Send to any phone number. Takes `to` + `text`. Optional: `effect`, `files`. |
+| `reply` | Reply to an inbound iMessage. Takes `chat_id` + `text`. Optional: `effect`, `reply_to`, `files`, `text_decorations`. Returns the sent message ID. |
+| `send` | Send to any phone number. Takes `to` + `text`. Optional: `effect`, `files`, `text_decorations`. Returns `chat_id` + `message_id`. |
 | `react` | Tapback reaction to a message by ID. Values: `like`, `love`, `laugh`, `dislike`, `emphasize`, `question`. |
 | `edit_message` | Edit a previously sent message. Useful for "working…" → result progress updates. |
+| `send_link` | Send a URL with a rich link preview card. Takes `chat_id` + `url`. Link must be the only content. |
+| `check_capability` | Check if a phone number supports iMessage or RCS. Takes `phone`, optional `service` (`imessage` or `rcs`). |
 
 Inbound messages trigger a typing indicator automatically — iMessage shows typing while the assistant works on a response.
 
@@ -239,6 +241,17 @@ Add iMessage effects to any outgoing message with the optional `effect` paramete
 
 Only one effect per message. Effects are visible on iOS/macOS only.
 
+## Text Decorations
+
+Style text with the `text_decorations` parameter on reply or send. Each decoration specifies a character range and a style or animation.
+
+- **Styles:** `bold`, `italic`, `strikethrough`, `underline`
+- **Animations:** `big`, `small`, `shake`, `nod`, `explode`, `ripple`, `bloom`, `jitter`
+
+Example: send "hello world" with "hello" bold → `text_decorations: [{"range": [0, 5], "style": "bold"}]`
+
+Style ranges can overlap, but animations cannot overlap with other animations or styles. Text decorations only render for iMessage recipients.
+
 ## Features
 
 - **Two-way iMessage** — text in, get replies back as iMessages
@@ -253,6 +266,9 @@ Only one effect per message. Effects are visible on iOS/macOS only.
 - **Tapback reactions** — Claude can react with like, love, laugh, etc.
 - **Ack reactions** — configurable tapback sent on message receipt
 - **Streaming edits** — send "working..." then update in-place (iOS 16+)
+- **Text decorations** — bold, italic, strikethrough, underline + animations (shake, explode, ripple, etc.)
+- **Rich link previews** — send URLs with preview cards via `send_link`
+- **Capability check** — verify iMessage/RCS support before sending
 - **Contact card** — auto-sets name to "Claude Code" with logo
 - **No ngrok needed** — polling-based, works behind any firewall
 
