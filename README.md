@@ -136,7 +136,7 @@ iMessage uses phone numbers as identifiers. The allowlist stores E.164 format nu
 
 Configure inbound behavior with `/imessage:access set <key> <value>`.
 
-**ackReaction** — tapback sent on message receipt. iMessage supports: `like`, `love`, `laugh`, `dislike`, `emphasis`, `question`. Empty string disables.
+**ackReaction** — tapback sent on message receipt. iMessage supports: `like`, `love`, `laugh`, `dislike`, `emphasize`, `question`. Empty string disables.
 
 ```
 /imessage:access set ackReaction love
@@ -204,10 +204,12 @@ Environment variables (`LINQ_TOKEN`, `LINQ_FROM_PHONE`, etc.) override the `.env
 
 | Tool | Purpose |
 |------|---------|
-| `reply` | Reply to an inbound iMessage. Takes `chat_id` + `text`. Returns the sent message ID. |
-| `send` | Send to any phone number. Takes `to` + `text`. |
-| `react` | Tapback reaction to a message by ID. Values: `like`, `love`, `laugh`, `dislike`, `emphasis`, `question`. |
+| `reply` | Reply to an inbound iMessage. Takes `chat_id` + `text`. Optional: `effect`, `reply_to`, `files`, `text_decorations`. Returns the sent message ID. |
+| `send` | Send to any phone number. Takes `to` + `text`. Optional: `effect`, `files`, `text_decorations`. Returns `chat_id` + `message_id`. |
+| `react` | Tapback reaction to a message by ID. Values: `like`, `love`, `laugh`, `dislike`, `emphasize`, `question`. |
 | `edit_message` | Edit a previously sent message. Useful for "working…" → result progress updates. |
+| `send_link` | Send a URL with a rich link preview card. Takes `chat_id` + `url`. Link must be the only content. |
+| `check_capability` | Check if a phone number supports iMessage or RCS. Takes `phone`, optional `service` (`imessage` or `rcs`). |
 
 Inbound messages trigger a typing indicator automatically — iMessage shows typing while the assistant works on a response.
 
@@ -226,15 +228,47 @@ The channel server polls the Linq API every 3 seconds for new messages (configur
 
 When Claude starts, it automatically sets a contact card ("Claude Code" with logo) so recipients see a friendly name in iMessage.
 
+## Photos
+
+Inbound photos are downloaded to `~/.claude/channels/imessage/inbox/` and the local path is included in the channel notification so the assistant can `Read` it. iMessage compresses photos — if you need the original file, send it as a document instead.
+
+## Effects
+
+Add iMessage effects to any outgoing message with the optional `effect` parameter:
+
+- **Screen effects:** `confetti`, `fireworks`, `lasers`, `sparkles`, `celebration`, `hearts`, `love`, `balloons`, `happy_birthday`, `echo`, `spotlight`
+- **Bubble effects:** `slam`, `loud`, `gentle`, `invisible`
+
+Only one effect per message. Effects are visible on iOS/macOS only.
+
+## Text Decorations
+
+Style text with the `text_decorations` parameter on reply or send. Each decoration specifies a character range and a style or animation.
+
+- **Styles:** `bold`, `italic`, `strikethrough`, `underline`
+- **Animations:** `big`, `small`, `shake`, `nod`, `explode`, `ripple`, `bloom`, `jitter`
+
+Example: send "hello world" with "hello" bold → `text_decorations: [{"range": [0, 5], "style": "bold"}]`
+
+Style ranges can overlap, but animations cannot overlap with other animations or styles. Text decorations only render for iMessage recipients.
+
 ## Features
 
 - **Two-way iMessage** — text in, get replies back as iMessages
+- **File attachments** — send images, videos, audio, documents via local file paths
+- **Inbound photos** — downloaded to `~/.claude/channels/imessage/inbox/`, Claude can view them
+- **iMessage effects** — confetti, fireworks, lasers, slam, gentle, and 10 more screen/bubble effects
+- **Threaded replies** — reply to a specific message with `reply_to`
+- **SMS/RCS fallback** — messages try iMessage first, fall back automatically
 - **Access control** — pairing flow, allowlist, open, or disabled policy
 - **Read receipts** — auto-sent when your message is received
 - **Typing indicators** — shows typing while Claude processes
 - **Tapback reactions** — Claude can react with like, love, laugh, etc.
 - **Ack reactions** — configurable tapback sent on message receipt
 - **Streaming edits** — send "working..." then update in-place (iOS 16+)
+- **Text decorations** — bold, italic, strikethrough, underline + animations (shake, explode, ripple, etc.)
+- **Rich link previews** — send URLs with preview cards via `send_link`
+- **Capability check** — verify iMessage/RCS support before sending
 - **Contact card** — auto-sets name to "Claude Code" with logo
 - **No ngrok needed** — polling-based, works behind any firewall
 

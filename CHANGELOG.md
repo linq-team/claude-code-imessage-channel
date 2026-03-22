@@ -11,6 +11,16 @@
 - Webhook server handles EADDRINUSE gracefully
 - Startup logic runs independently of webhook
 - Legacy fallback for `~/.linq/config.json` with migration warning
+- SMS/RCS fallback via `preferred_service` on all outbound messages
+- 15 iMessage effects (confetti, fireworks, lasers, slam, gentle, etc.)
+- Threaded replies via `reply_to` parameter
+- File attachments on reply/send via Linq presigned URL upload
+- Inbound photo download to `~/.claude/channels/imessage/inbox/`
+- Migrated to `@linqapp/sdk` — no more raw API calls
+- Text decorations (bold, italic, strikethrough, underline, shake, explode, etc.)
+- Rich link previews via `send_link` tool
+- Capability check (`check_capability`) for iMessage/RCS support
+- `send` tool now returns `chat_id` and `message_id` for chaining
 
 ## 0.1.0
 
