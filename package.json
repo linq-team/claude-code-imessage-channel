@@ -9,11 +9,12 @@
     "start": "npm install --no-summary && npx tsc && node dist/channel.js"
   },
   "dependencies": {
+    "@linqapp/sdk": "^0.12.2",
     "@modelcontextprotocol/sdk": "^1.12.1"
   },
   "devDependencies": {
-    "typescript": "^5.7.0",
-    "@types/node": "^22.0.0"
+    "@types/node": "^22.0.0",
+    "typescript": "^5.7.0"
   },
   "engines": {
     "node": ">=22"

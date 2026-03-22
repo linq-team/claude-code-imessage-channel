@@ -18,10 +18,10 @@ import {
   ListToolsRequestSchema,
   CallToolRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js'
+import Linq from '@linqapp/sdk'
 import http from 'node:http'
 import fs from 'node:fs'
 import path from 'node:path'
-
 
 // --- Configuration ---
 
@@ -89,14 +89,12 @@ function parseEnvFile(filePath: string): Record<string, string> {
 }
 
 function loadChannelConfig(): ChannelConfig {
-  // Priority: env vars > ~/.claude/channels/imessage/.env + config.json > ~/.linq/config.json (legacy)
   let token = process.env.LINQ_TOKEN || ''
   let fromPhone = process.env.LINQ_FROM_PHONE || ''
-  let apiUrl = process.env.LINQ_API_URL || 'https://api.linqapp.com/v3'
+  let apiUrl = process.env.LINQ_API_URL || 'https://api.linqapp.com/api/partner'
   let defaultRecipient = process.env.LINQ_DEFAULT_RECIPIENT || ''
   let allowedSenders = process.env.LINQ_ALLOWED_SENDERS || ''
 
-  // Read from ~/.claude/channels/imessage/
   const envVars = parseEnvFile(path.join(CHANNEL_DIR, '.env'))
   token = token || envVars.LINQ_TOKEN || ''
   fromPhone = fromPhone || envVars.LINQ_FROM_PHONE || ''
@@ -104,7 +102,6 @@ function loadChannelConfig(): ChannelConfig {
   defaultRecipient = defaultRecipient || envVars.LINQ_DEFAULT_RECIPIENT || ''
   allowedSenders = allowedSenders || envVars.LINQ_ALLOWED_SENDERS || ''
 
-  // Read optional config.json for non-secret settings
   const configJsonPath = path.join(CHANNEL_DIR, 'config.json')
   try {
     const cfg = JSON.parse(fs.readFileSync(configJsonPath, 'utf-8'))
@@ -145,10 +142,17 @@ function loadChannelConfig(): ChannelConfig {
 
 const config = loadChannelConfig()
 
+// --- Linq SDK Client ---
+
+const linq = new Linq({
+  apiKey: config.token,
+  baseURL: config.apiUrl,
+})
+
 // --- MCP Channel Server ---
 
 const mcp = new Server(
-  { name: 'imessage', version: '0.1.0' },
+  { name: 'imessage', version: '0.2.0' },
   {
     capabilities: {
       experimental: { 'claude/channel': {} },
@@ -165,6 +169,9 @@ When you receive a message:
 - Read receipts and typing indicators are sent automatically
 - If the channel event meta has an image_path attribute, Read that file — it is a photo the sender attached. Respond about what you see.
 - For non-image attachments, the meta will contain attachment details with local file paths you can Read.
+- For bold/italic/underline text, use text_decorations on reply/send. Example: text "hello world" with text_decorations [{"range": [0, 5], "style": "bold"}] makes "hello" bold. Animations: shake, explode, ripple, bloom, jitter. Do NOT use markdown — iMessage doesn't render it.
+- To send a URL with a rich preview card, use the send_link tool instead of putting the URL in text.
+- Use check_capability to verify if a number supports iMessage or RCS before sending.
 
 The person texting you is your operator. Follow their instructions. Be concise in replies - this is iMessage, not email.
 Your iMessage number: ${config.fromPhone}`,
@@ -186,6 +193,7 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           effect: { type: 'string', description: 'Optional iMessage effect. Screen: confetti, fireworks, lasers, sparkles, celebration, hearts, love, balloons, happy_birthday, echo, spotlight. Bubble: slam, loud, gentle, invisible.' },
           reply_to: { type: 'string', description: 'Optional message ID to reply to, creating a threaded conversation' },
           files: { type: 'array', items: { type: 'string' }, description: 'Optional absolute file paths to attach. Images, videos, audio, documents supported. Max 100MB each.' },
+          text_decorations: { type: 'array', items: { type: 'object', properties: { range: { type: 'array', items: { type: 'number' } }, style: { type: 'string' }, animation: { type: 'string' } } }, description: 'Optional text styling. Each item has range [start, end) and either style (bold, italic, strikethrough, underline) or animation (big, small, shake, nod, explode, ripple, bloom, jitter). iMessage only.' },
         },
         required: ['chat_id', 'text'],
       },
@@ -225,23 +233,37 @@ mcp.setRequestHandler(ListToolsRequestSchema, async () => ({
           text: { type: 'string', description: 'Message to send' },
           effect: { type: 'string', description: 'Optional iMessage effect. Screen: confetti, fireworks, lasers, sparkles, celebration, hearts, love, balloons, happy_birthday, echo, spotlight. Bubble: slam, loud, gentle, invisible.' },
           files: { type: 'array', items: { type: 'string' }, description: 'Optional absolute file paths to attach. Images, videos, audio, documents supported. Max 100MB each.' },
+          text_decorations: { type: 'array', items: { type: 'object', properties: { range: { type: 'array', items: { type: 'number' } }, style: { type: 'string' }, animation: { type: 'string' } } }, description: 'Optional text styling. Each item has range [start, end) and either style (bold, italic, strikethrough, underline) or animation (big, small, shake, nod, explode, ripple, bloom, jitter). iMessage only.' },
         },
         required: ['to', 'text'],
       },
     },
+    {
+      name: 'send_link',
+      description: 'Send a URL with a rich link preview card via iMessage. The link must be the only content — no text or media alongside it.',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          chat_id: { type: 'string', description: 'Chat ID to send to' },
+          url: { type: 'string', description: 'URL to send with rich preview' },
+        },
+        required: ['chat_id', 'url'],
+      },
+    },
+    {
+      name: 'check_capability',
+      description: 'Check if a phone number supports iMessage or RCS before sending',
+      inputSchema: {
+        type: 'object' as const,
+        properties: {
+          phone: { type: 'string', description: 'Phone number to check (e.g. +1XXXXXXXXXX)' },
+          service: { type: 'string', enum: ['imessage', 'rcs'], description: 'Service to check for. Default: imessage' },
+        },
+        required: ['phone'],
+      },
+    },
   ],
 }))
-
-async function linqApiCall(endpoint: string, body: object, method = 'POST'): Promise<Response> {
-  return fetch(`${config.apiUrl}/${endpoint}`, {
-    method,
-    headers: {
-      'Authorization': `Bearer ${config.token}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  })
-}
 
 // --- File upload helper ---
 
@@ -259,20 +281,16 @@ const MIME_TYPES: Record<string, string> = {
 
 async function uploadFile(filePath: string): Promise<string> {
   const ext = path.extname(filePath).toLowerCase()
-  const contentType = MIME_TYPES[ext] || 'application/octet-stream'
+  const contentType = (MIME_TYPES[ext] || 'application/octet-stream') as any
   const filename = path.basename(filePath)
   const stat = fs.statSync(filePath)
 
-  // Step 1: Get presigned upload URL
-  const createResp = await linqApiCall('attachments', {
+  const { attachment_id, upload_url, required_headers } = await linq.attachments.create({
     filename,
     content_type: contentType,
     size_bytes: stat.size,
   })
-  if (!createResp.ok) throw new Error(`Failed to create attachment: ${await createResp.text()}`)
-  const { attachment_id, upload_url, required_headers } = await createResp.json() as any
 
-  // Step 2: Upload file bytes
   const fileBuffer = fs.readFileSync(filePath)
   const uploadResp = await fetch(upload_url, {
     method: 'PUT',
@@ -284,53 +302,55 @@ async function uploadFile(filePath: string): Promise<string> {
   return attachment_id
 }
 
-// Auto read receipt + typing indicator helpers
+// --- Helpers ---
+
+const BUBBLE_EFFECTS = ['slam', 'loud', 'gentle', 'invisible']
+
+function buildMessage(text: string, opts?: { effect?: string; reply_to?: string; files_ids?: string[]; text_decorations?: any[] }) {
+  const textPart: any = { type: 'text', value: text }
+  if (opts?.text_decorations?.length) textPart.text_decorations = opts.text_decorations
+  const parts: any[] = [textPart]
+  if (opts?.files_ids) {
+    for (const id of opts.files_ids) parts.push({ type: 'media', attachment_id: id })
+  }
+  const message: any = { parts, preferred_service: 'iMessage' as const }
+  if (opts?.effect) message.effect = { name: opts.effect, type: BUBBLE_EFFECTS.includes(opts.effect) ? 'bubble' : 'screen' }
+  if (opts?.reply_to) message.reply_to = { message_id: opts.reply_to }
+  return message
+}
+
+async function uploadFiles(files?: string[]): Promise<string[]> {
+  if (!files) return []
+  const ids: string[] = []
+  for (const f of files) ids.push(await uploadFile(f))
+  return ids
+}
+
 async function markRead(chatId: string): Promise<void> {
-  try {
-    await linqApiCall(`chats/${chatId}/read`, {})
-  } catch {}
+  try { await linq.chats.markAsRead(chatId) } catch {}
 }
 
 async function startTyping(chatId: string): Promise<void> {
-  try {
-    await linqApiCall(`chats/${chatId}/typing`, {})
-  } catch {}
+  try { await linq.chats.typing.start(chatId) } catch {}
 }
 
 async function stopTyping(chatId: string): Promise<void> {
-  try {
-    await fetch(`${config.apiUrl}/chats/${chatId}/typing`, {
-      method: 'DELETE',
-      headers: { 'Authorization': `Bearer ${config.token}` },
-    })
-  } catch {}
+  try { await linq.chats.typing.stop(chatId) } catch {}
 }
+
+// --- Tool Handlers ---
 
 mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   const { name, arguments: args } = req.params
 
   if (name === 'reply') {
-    const { chat_id, text, effect, reply_to, files } = args as { chat_id: string; text: string; effect?: string; reply_to?: string; files?: string[] }
+    const { chat_id, text, effect, reply_to, files, text_decorations } = args as { chat_id: string; text: string; effect?: string; reply_to?: string; files?: string[]; text_decorations?: any[] }
     try {
       await stopTyping(chat_id)
-      const bubbleEffects = ['slam', 'loud', 'gentle', 'invisible']
-      const parts: any[] = [{ type: 'text', value: text }]
-      if (files) {
-        for (const filePath of files) {
-          const attachmentId = await uploadFile(filePath)
-          parts.push({ type: 'media', attachment_id: attachmentId })
-        }
-      }
-      const message: any = { parts, preferred_service: 'iMessage' }
-      if (effect) message.effect = { name: effect, type: bubbleEffects.includes(effect) ? 'bubble' : 'screen' }
-      if (reply_to) message.reply_to = { message_id: reply_to }
-      const resp = await linqApiCall(`chats/${chat_id}/messages`, { message })
-      if (!resp.ok) {
-        const err = await resp.text()
-        return { content: [{ type: 'text' as const, text: `Failed: ${err}` }], isError: true }
-      }
-      const data = await resp.json() as any
-      const messageId = data.message?.id || data.id || ''
+      const fileIds = await uploadFiles(files)
+      const message = buildMessage(text, { effect, reply_to, files_ids: fileIds, text_decorations })
+      const data = await linq.chats.messages.send(chat_id, { message })
+      const messageId = data.message?.id || ''
       return { content: [{ type: 'text' as const, text: `sent via iMessage (message_id: ${messageId})` }] }
     } catch (e: any) {
       return { content: [{ type: 'text' as const, text: `Error: ${e.message}` }], isError: true }
@@ -340,18 +360,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (name === 'edit_message') {
     const { message_id, text } = args as { message_id: string; text: string }
     try {
-      const resp = await fetch(`${config.apiUrl}/messages/${message_id}`, {
-        method: 'PATCH',
-        headers: {
-          'Authorization': `Bearer ${config.token}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ part_index: 0, text }),
-      })
-      if (!resp.ok) {
-        const err = await resp.text()
-        return { content: [{ type: 'text' as const, text: `Failed to edit: ${err}` }], isError: true }
-      }
+      await linq.messages.update(message_id, { text, part_index: 0 })
       return { content: [{ type: 'text' as const, text: 'message edited' }] }
     } catch (e: any) {
       return { content: [{ type: 'text' as const, text: `Error: ${e.message}` }], isError: true }
@@ -359,17 +368,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
 
   if (name === 'react') {
-    const { chat_id, message_id, reaction } = args as { chat_id: string; message_id: string; reaction: string }
+    const { message_id, reaction } = args as { chat_id: string; message_id: string; reaction: string }
     try {
-      const resp = await linqApiCall(`messages/${message_id}/reactions`, {
-        type: reaction,
+      await linq.messages.addReaction(message_id, {
+        type: reaction as any,
         operation: 'add',
         part_index: 0,
       })
-      if (!resp.ok) {
-        const err = await resp.text()
-        return { content: [{ type: 'text' as const, text: `Failed: ${err}` }], isError: true }
-      }
       return { content: [{ type: 'text' as const, text: `reacted with ${reaction}` }] }
     } catch (e: any) {
       return { content: [{ type: 'text' as const, text: `Error: ${e.message}` }], isError: true }
@@ -377,28 +382,44 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   }
 
   if (name === 'send') {
-    const { to, text, effect, files } = args as { to: string; text: string; effect?: string; files?: string[] }
+    const { to, text, effect, files, text_decorations } = args as { to: string; text: string; effect?: string; files?: string[]; text_decorations?: any[] }
     try {
-      const bubbleEffects = ['slam', 'loud', 'gentle', 'invisible']
-      const parts: any[] = [{ type: 'text', value: text }]
-      if (files) {
-        for (const filePath of files) {
-          const attachmentId = await uploadFile(filePath)
-          parts.push({ type: 'media', attachment_id: attachmentId })
-        }
-      }
-      const message: any = { parts, preferred_service: 'iMessage' }
-      if (effect) message.effect = { name: effect, type: bubbleEffects.includes(effect) ? 'bubble' : 'screen' }
-      const resp = await linqApiCall('chats', {
+      const fileIds = await uploadFiles(files)
+      const message = buildMessage(text, { effect, files_ids: fileIds, text_decorations })
+      const data = await linq.chats.create({
         to: [to],
         from: config.fromPhone,
         message,
       })
-      if (!resp.ok) {
-        const err = await resp.text()
-        return { content: [{ type: 'text' as const, text: `Failed: ${err}` }], isError: true }
-      }
-      return { content: [{ type: 'text' as const, text: `sent to ${to}` }] }
+      const chatId = data.chat?.id || ''
+      const messageId = (data.chat as any)?.message?.id || ''
+      return { content: [{ type: 'text' as const, text: `sent to ${to} (chat_id: ${chatId}, message_id: ${messageId})` }] }
+    } catch (e: any) {
+      return { content: [{ type: 'text' as const, text: `Error: ${e.message}` }], isError: true }
+    }
+  }
+
+  if (name === 'send_link') {
+    const { chat_id, url } = args as { chat_id: string; url: string }
+    try {
+      const data = await linq.chats.messages.send(chat_id, {
+        message: { parts: [{ type: 'link', value: url }] },
+      })
+      const messageId = data.message?.id || ''
+      return { content: [{ type: 'text' as const, text: `link sent (message_id: ${messageId})` }] }
+    } catch (e: any) {
+      return { content: [{ type: 'text' as const, text: `Error: ${e.message}` }], isError: true }
+    }
+  }
+
+  if (name === 'check_capability') {
+    const { phone, service } = args as { phone: string; service?: string }
+    try {
+      const check = service === 'rcs'
+        ? await linq.capability.checkRCS({ address: phone, from: config.fromPhone })
+        : await linq.capability.checkiMessage({ address: phone, from: config.fromPhone })
+      const svc = service === 'rcs' ? 'RCS' : 'iMessage'
+      return { content: [{ type: 'text' as const, text: check.available ? `${phone} supports ${svc}` : `${phone} does not support ${svc}` }] }
     } catch (e: any) {
       return { content: [{ type: 'text' as const, text: `Error: ${e.message}` }], isError: true }
     }
@@ -411,8 +432,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
 
 await mcp.connect(new StdioServerTransport())
 
-// --- Message Polling (like Telegram's long-polling approach) ---
-// No ngrok needed - we poll the Linq API for new messages every few seconds
+// --- Message Polling ---
 
 const POLL_INTERVAL = parseInt(process.env.LINQ_POLL_INTERVAL || '3000', 10)
 const seenMessageIds = new Set<string>()
@@ -420,35 +440,19 @@ let lastPollTime = new Date().toISOString()
 
 async function pollForMessages(): Promise<void> {
   try {
-    // Get chats for this phone number
-    const chatsResp = await fetch(`${config.apiUrl}/chats?from=${encodeURIComponent(config.fromPhone)}&limit=10`, {
-      headers: { 'Authorization': `Bearer ${config.token}` },
-    })
-    if (!chatsResp.ok) return
-
-    const chatsData = await chatsResp.json() as any
+    const chatsData = await linq.chats.listChats({ from: config.fromPhone, limit: 10 })
     const chats = chatsData.chats || []
 
     for (const chat of chats) {
       const chatId = chat.id
-      // Get recent messages in this chat
-      const msgsResp = await fetch(`${config.apiUrl}/chats/${chatId}/messages?limit=5`, {
-        headers: { 'Authorization': `Bearer ${config.token}` },
-      })
-      if (!msgsResp.ok) continue
-
-      const msgsData = await msgsResp.json() as any
+      const msgsData = await linq.chats.messages.list(chatId, { limit: 5 })
       const messages = msgsData.messages || []
 
       for (const msg of messages) {
-        // Skip if already seen
         if (seenMessageIds.has(msg.id)) continue
         seenMessageIds.add(msg.id)
-
-        // Skip our own outbound messages
         if (msg.is_from_me) continue
 
-        // Skip old messages (before channel started)
         const msgTime = new Date(msg.sent_at || msg.created_at || 0)
         const startTime = new Date(lastPollTime)
         if (msgTime < startTime) continue
@@ -458,47 +462,37 @@ async function pollForMessages(): Promise<void> {
         const attachments: { id: string; filename: string; mime_type: string; localPath?: string }[] = []
         const inboxDir = path.join(CHANNEL_DIR, 'inbox')
         for (const part of (msg.parts || [])) {
-          if (part.type === 'text') messageText = part.value || ''
-          if (part.type === 'media' && part.id) {
-            const filename = part.filename || `${part.id}.bin`
+          if (part.type === 'text') messageText = (part as any).value || ''
+          if (part.type === 'media' && (part as any).id) {
+            const partId = (part as any).id
+            const filename = (part as any).filename || `${partId}.bin`
             try {
-              const attResp = await fetch(`${config.apiUrl}/attachments/${part.id}`, {
-                headers: { 'Authorization': `Bearer ${config.token}` },
-                signal: AbortSignal.timeout(5000),
-              })
-              if (attResp.ok) {
-                const attData = await attResp.json() as any
-                let localPath: string | undefined
-                if (attData.download_url) {
-                  try {
-                    fs.mkdirSync(inboxDir, { recursive: true })
-                    const dlResp = await fetch(attData.download_url, { signal: AbortSignal.timeout(15000) })
-                    if (dlResp.ok) {
-                      const buffer = Buffer.from(await dlResp.arrayBuffer())
-                      localPath = path.join(inboxDir, filename)
-                      fs.writeFileSync(localPath, buffer)
-                    }
-                  } catch (e: any) {
+              const attData = await linq.attachments.retrieve(partId)
+              let localPath: string | undefined
+              if (attData.download_url) {
+                try {
+                  fs.mkdirSync(inboxDir, { recursive: true })
+                  const dlResp = await fetch(attData.download_url, { signal: AbortSignal.timeout(15000) })
+                  if (dlResp.ok) {
+                    const buffer = Buffer.from(await dlResp.arrayBuffer())
+                    localPath = path.join(inboxDir, filename)
+                    fs.writeFileSync(localPath, buffer)
                   }
-                }
-                attachments.push({ id: part.id, filename, mime_type: part.mime_type || 'unknown', localPath })
-              } else {
-                attachments.push({ id: part.id, filename, mime_type: part.mime_type || 'unknown' })
+                } catch {}
               }
-            } catch (e: any) {
-              attachments.push({ id: part.id, filename, mime_type: part.mime_type || 'unknown' })
+              attachments.push({ id: partId, filename, mime_type: (part as any).mime_type || 'unknown', localPath })
+            } catch {
+              attachments.push({ id: partId, filename, mime_type: (part as any).mime_type || 'unknown' })
             }
           }
         }
-        messageText = messageText || msg.text || ''
+        messageText = messageText || (msg as any).text || ''
         if (!messageText && attachments.length === 0) continue
 
-        // Extract sender
-        const sender = msg.from || msg.from_handle?.handle || chat.handles?.find((h: any) => !h.is_me)?.handle || ''
+        const sender = (msg as any).from || (msg as any).from_handle?.handle || (chat as any).handles?.find((h: any) => !h.is_me)?.handle || ''
 
-        // Access control — re-read on every message so skill changes take effect live
+        // Access control
         const access = loadAccessConfig()
-
         if (access.dmPolicy === 'disabled') {
           console.error(`[imessage] Dropped (policy: disabled)`)
           continue
@@ -510,13 +504,11 @@ async function pollForMessages(): Promise<void> {
 
         if (!isAllowed) {
           if (access.dmPolicy === 'pairing') {
-            // Generate pairing code and reply
             const code = generatePairingCode()
             access.pendingPairings[code] = { phone: sender, createdAt: new Date().toISOString() }
             saveAccessConfig(access)
-            // Reply with pairing code via Linq API
             try {
-              await linqApiCall(`chats/${chatId}/messages`, {
+              await linq.chats.messages.send(chatId, {
                 message: { parts: [{ type: 'text', value: `Pairing code: ${code}\nGive this to the Claude Code operator to approve your access.` }] },
               })
             } catch {}
@@ -530,16 +522,14 @@ async function pollForMessages(): Promise<void> {
         // Ack reaction
         if (access.ackReaction && msg.id) {
           try {
-            await linqApiCall(`messages/${msg.id}/reactions`, { type: access.ackReaction, operation: 'add', part_index: 0 })
+            await linq.messages.addReaction(msg.id, { type: access.ackReaction as any, operation: 'add', part_index: 0 })
           } catch {}
         }
 
-        // Auto read receipt + typing indicator
         markRead(chatId)
         startTyping(chatId)
 
-
-        // Push to Claude Code — image_path goes in meta, not content (prevents forgery)
+        // Push to Claude Code
         const imagePaths = attachments.filter(a => a.localPath && a.mime_type.startsWith('image/')).map(a => a.localPath!)
         await mcp.notification({
           method: 'notifications/claude/channel',
@@ -565,7 +555,6 @@ async function pollForMessages(): Promise<void> {
       }
     }
 
-    // Cap the seen set size
     if (seenMessageIds.size > 1000) {
       const arr = [...seenMessageIds]
       arr.splice(0, arr.length - 500)
@@ -585,50 +574,29 @@ async function setupContactCard(): Promise<void> {
   if (!config.fromPhone || !config.token) return
 
   try {
-    // Check if contact card already exists
-    const getResp = await fetch(
-      `${config.apiUrl}/contact_card?phone_number=${encodeURIComponent(config.fromPhone)}`,
-      { headers: { 'Authorization': `Bearer ${config.token}` } }
-    )
+    const existing = await linq.contactCard.retrieve({ phone_number: config.fromPhone })
+    const cards = (existing as any).contact_cards || []
+    const active = cards.find((c: any) => c.phone_number === config.fromPhone && c.is_active)
 
-    if (getResp.ok) {
-      const data = await getResp.json() as any
-      const cards = data.contact_cards || []
-      const existing = cards.find((c: any) => c.phone_number === config.fromPhone && c.is_active)
-
-      if (existing && existing.first_name === 'Claude' && existing.last_name === 'Code') {
-        console.error(`[imessage]   Contact card already set: Claude Code`)
-        return
-      }
+    if (active && active.first_name === 'Claude' && active.last_name === 'Code') {
+      console.error(`[imessage]   Contact card already set: Claude Code`)
+      return
     }
 
-    // Create or update contact card
-    const resp = await fetch(`${config.apiUrl}/contact_card`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${config.token}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        phone_number: config.fromPhone,
-        first_name: 'Claude',
-        last_name: 'Code',
-        image_url: CLAUDE_CODE_LOGO,
-      }),
+    await linq.contactCard.create({
+      phone_number: config.fromPhone,
+      first_name: 'Claude',
+      last_name: 'Code',
+      image_url: CLAUDE_CODE_LOGO,
     })
-
-    if (resp.ok) {
-      console.error(`[imessage]   Contact card set: Claude Code`)
-    } else {
-      const err = await resp.text()
-      console.error(`[imessage]   Contact card setup failed: ${err}`)
-    }
+    console.error(`[imessage]   Contact card set: Claude Code`)
   } catch (e: any) {
     console.error(`[imessage]   Contact card setup error: ${e.message}`)
   }
 }
 
-// Also keep the webhook listener as a fallback
+// --- Webhook fallback ---
+
 const webhookServer = http.createServer(async (req, res) => {
   if (req.method !== 'POST') {
     res.writeHead(405)
@@ -649,7 +617,7 @@ const webhookServer = http.createServer(async (req, res) => {
     const messageId = data.message?.id || ''
 
     if (!messageText) { res.writeHead(200); res.end('ok'); return }
-    if (messageId) seenMessageIds.add(messageId) // prevent duplicate from polling
+    if (messageId) seenMessageIds.add(messageId)
 
     const access = loadAccessConfig()
     if (access.dmPolicy === 'disabled') { res.writeHead(200); res.end('ok'); return }
@@ -686,7 +654,7 @@ webhookServer.listen(config.webhookPort, '127.0.0.1', () => {
   console.error(`[imessage]   Webhook: http://127.0.0.1:${config.webhookPort} (fallback)`)
 })
 
-// --- Startup (runs regardless of webhook) ---
+// --- Startup ---
 
 const startupAccess = loadAccessConfig()
 
