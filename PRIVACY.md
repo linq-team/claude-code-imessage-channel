@@ -66,7 +66,7 @@ This plugin relies on two third-party services:
 
 - You can delete all local plugin data at any time by removing `~/.claude/channels/imessage/`.
 - You can revoke API access by regenerating your Linq token.
-- For data held by Linq, contact [privacy@linqapp.com](mailto:privacy@linqapp.com).
+- For data held by Linq, contact [data-privacy@linqapp.com](mailto:data-privacy@linqapp.com).
 - For data held by Anthropic, see [Anthropic's Privacy Policy](https://www.anthropic.com/privacy).
 
 ## Contact
@@ -74,5 +74,5 @@ This plugin relies on two third-party services:
 For questions about this plugin's privacy practices:
 
 - **Plugin**: [GitHub Issues](https://github.com/linq-team/claude-code-imessage-channel/issues)
-- **Linq platform**: [privacy@linqapp.com](mailto:privacy@linqapp.com)
+- **Linq platform**: [data-privacy@linqapp.com](mailto:data-privacy@linqapp.com)
 - **Linq App Inc.**, Attn: Data Privacy Officer, 1904 1st Ave. N, Suite 200, Birmingham, AL 35203
