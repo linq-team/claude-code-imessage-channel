@@ -142,6 +142,13 @@ function loadChannelConfig(): ChannelConfig {
 
 const config = loadChannelConfig()
 
+if (!config.token) {
+  console.error('[imessage] WARNING: LINQ_TOKEN not configured — API calls will fail. Run /imessage:configure <token>')
+}
+if (!config.fromPhone) {
+  console.error('[imessage] WARNING: LINQ_FROM_PHONE not configured — cannot send messages. Run /imessage:configure <phone>')
+}
+
 // --- Linq SDK Client ---
 
 const linq = new Linq({
@@ -669,8 +676,12 @@ if (startupAccess.allowFrom.length > 0) {
 
 setupContactCard()
 
-setInterval(pollForMessages, startupAccess.pollInterval || POLL_INTERVAL)
-console.error(`[imessage]   Polling started`)
+if (config.token && config.fromPhone) {
+  setInterval(pollForMessages, startupAccess.pollInterval || POLL_INTERVAL)
+  console.error(`[imessage]   Polling started`)
+} else {
+  console.error(`[imessage]   Polling skipped (not configured)`)
+}
 
 setTimeout(async () => {
   const recipient = config.defaultRecipient || startupAccess.defaultRecipient || (startupAccess.allowFrom.length > 0 ? startupAccess.allowFrom[0] : '')
