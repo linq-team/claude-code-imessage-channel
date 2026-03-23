@@ -72,6 +72,33 @@ function generatePairingCode(): string {
 }
 
 const CHANNEL_DIR = path.join(process.env.HOME || '', '.claude', 'channels', 'imessage')
+const STATE_FILE = path.join(CHANNEL_DIR, '.state.json')
+
+interface ChannelState {
+  lastPollTime: string
+  seenIds: string[]
+}
+
+function loadState(): ChannelState {
+  try {
+    const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'))
+    return {
+      lastPollTime: raw.lastPollTime || new Date().toISOString(),
+      seenIds: raw.seenIds || [],
+    }
+  } catch {
+    return { lastPollTime: new Date().toISOString(), seenIds: [] }
+  }
+}
+
+function saveState(lastPollTime: string, seenIds: string[]): void {
+  try {
+    fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true })
+    fs.writeFileSync(STATE_FILE, JSON.stringify({ lastPollTime, seenIds: seenIds.slice(-500) }, null, 2) + '\n')
+  } catch (e: any) {
+    console.error('[imessage] Failed to save state:', e.message)
+  }
+}
 
 function parseEnvFile(filePath: string): Record<string, string> {
   const vars: Record<string, string> = {}
@@ -442,8 +469,9 @@ await mcp.connect(new StdioServerTransport())
 // --- Message Polling ---
 
 const POLL_INTERVAL = parseInt(process.env.LINQ_POLL_INTERVAL || '3000', 10)
-const seenMessageIds = new Set<string>()
-let lastPollTime = new Date().toISOString()
+const savedState = loadState()
+const seenMessageIds = new Set<string>(savedState.seenIds)
+let lastPollTime = savedState.lastPollTime
 
 async function pollForMessages(): Promise<void> {
   try {
@@ -561,6 +589,9 @@ async function pollForMessages(): Promise<void> {
         console.error(`[imessage] ${sender}: ${messageText.substring(0, 80)}${attachments.length > 0 ? ` [${attachments.length} attachment(s)]` : ''}`)
       }
     }
+
+    lastPollTime = new Date().toISOString()
+    saveState(lastPollTime, [...seenMessageIds])
 
     if (seenMessageIds.size > 1000) {
       const arr = [...seenMessageIds]
