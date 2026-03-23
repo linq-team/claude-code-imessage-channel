@@ -283,7 +283,7 @@ async function uploadFile(filePath: string): Promise<string> {
   const ext = path.extname(filePath).toLowerCase()
   const contentType = (MIME_TYPES[ext] || 'application/octet-stream') as any
   const filename = path.basename(filePath)
-  const stat = fs.statSync(filePath)
+  const stat = await fs.promises.stat(filePath)
 
   const { attachment_id, upload_url, required_headers } = await linq.attachments.create({
     filename,
@@ -291,7 +291,7 @@ async function uploadFile(filePath: string): Promise<string> {
     size_bytes: stat.size,
   })
 
-  const fileBuffer = fs.readFileSync(filePath)
+  const fileBuffer = await fs.promises.readFile(filePath)
   const uploadResp = await fetch(upload_url, {
     method: 'PUT',
     headers: required_headers,
@@ -471,12 +471,12 @@ async function pollForMessages(): Promise<void> {
               let localPath: string | undefined
               if (attData.download_url) {
                 try {
-                  fs.mkdirSync(inboxDir, { recursive: true })
+                  await fs.promises.mkdir(inboxDir, { recursive: true })
                   const dlResp = await fetch(attData.download_url, { signal: AbortSignal.timeout(15000) })
                   if (dlResp.ok) {
                     const buffer = Buffer.from(await dlResp.arrayBuffer())
-                    localPath = path.join(inboxDir, filename)
-                    fs.writeFileSync(localPath, buffer)
+                    localPath = path.join(inboxDir, `${msg.id}_${filename}`)
+                    await fs.promises.writeFile(localPath, buffer)
                   }
                 } catch {}
               }
