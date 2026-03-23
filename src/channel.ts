@@ -72,6 +72,33 @@ function generatePairingCode(): string {
 }
 
 const CHANNEL_DIR = path.join(process.env.HOME || '', '.claude', 'channels', 'imessage')
+const STATE_FILE = path.join(CHANNEL_DIR, '.state.json')
+
+interface ChannelState {
+  lastPollTime: string
+  seenIds: string[]
+}
+
+function loadState(): ChannelState {
+  try {
+    const raw = JSON.parse(fs.readFileSync(STATE_FILE, 'utf-8'))
+    return {
+      lastPollTime: raw.lastPollTime || new Date().toISOString(),
+      seenIds: raw.seenIds || [],
+    }
+  } catch {
+    return { lastPollTime: new Date().toISOString(), seenIds: [] }
+  }
+}
+
+function saveState(lastPollTime: string, seenIds: string[]): void {
+  try {
+    fs.mkdirSync(path.dirname(STATE_FILE), { recursive: true })
+    fs.writeFileSync(STATE_FILE, JSON.stringify({ lastPollTime, seenIds: seenIds.slice(-500) }, null, 2) + '\n')
+  } catch (e: any) {
+    console.error('[imessage] Failed to save state:', e.message)
+  }
+}
 
 function parseEnvFile(filePath: string): Record<string, string> {
   const vars: Record<string, string> = {}
@@ -84,7 +111,7 @@ function parseEnvFile(filePath: string): Record<string, string> {
       if (eq === -1) continue
       vars[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim()
     }
-  } catch {}
+  } catch (e: any) { console.error('[imessage] Failed to read env file:', e.message) }
   return vars
 }
 
@@ -108,7 +135,7 @@ function loadChannelConfig(): ChannelConfig {
     defaultRecipient = defaultRecipient || cfg.defaultRecipient || ''
     allowedSenders = allowedSenders || (cfg.allowedSenders || []).join(',')
     if (cfg.apiUrl) apiUrl = cfg.apiUrl
-  } catch {}
+  } catch (e: any) { /* config.json is optional */ }
 
   // Legacy fallback: ~/.linq/config.json
   if (!token || !fromPhone) {
@@ -141,6 +168,13 @@ function loadChannelConfig(): ChannelConfig {
 }
 
 const config = loadChannelConfig()
+
+if (!config.token) {
+  console.error('[imessage] WARNING: LINQ_TOKEN not configured — API calls will fail. Run /imessage:configure <token>')
+}
+if (!config.fromPhone) {
+  console.error('[imessage] WARNING: LINQ_FROM_PHONE not configured — cannot send messages. Run /imessage:configure <phone>')
+}
 
 // --- Linq SDK Client ---
 
@@ -283,7 +317,7 @@ async function uploadFile(filePath: string): Promise<string> {
   const ext = path.extname(filePath).toLowerCase()
   const contentType = (MIME_TYPES[ext] || 'application/octet-stream') as any
   const filename = path.basename(filePath)
-  const stat = fs.statSync(filePath)
+  const stat = await fs.promises.stat(filePath)
 
   const { attachment_id, upload_url, required_headers } = await linq.attachments.create({
     filename,
@@ -291,7 +325,7 @@ async function uploadFile(filePath: string): Promise<string> {
     size_bytes: stat.size,
   })
 
-  const fileBuffer = fs.readFileSync(filePath)
+  const fileBuffer = await fs.promises.readFile(filePath)
   const uploadResp = await fetch(upload_url, {
     method: 'PUT',
     headers: required_headers,
@@ -327,15 +361,15 @@ async function uploadFiles(files?: string[]): Promise<string[]> {
 }
 
 async function markRead(chatId: string): Promise<void> {
-  try { await linq.chats.markAsRead(chatId) } catch {}
+  try { await linq.chats.markAsRead(chatId) } catch (e: any) { console.error('[imessage] markRead error:', e.message) }
 }
 
 async function startTyping(chatId: string): Promise<void> {
-  try { await linq.chats.typing.start(chatId) } catch {}
+  try { await linq.chats.typing.start(chatId) } catch (e: any) { console.error('[imessage] startTyping error:', e.message) }
 }
 
 async function stopTyping(chatId: string): Promise<void> {
-  try { await linq.chats.typing.stop(chatId) } catch {}
+  try { await linq.chats.typing.stop(chatId) } catch (e: any) { console.error('[imessage] stopTyping error:', e.message) }
 }
 
 // --- Tool Handlers ---
@@ -435,8 +469,9 @@ await mcp.connect(new StdioServerTransport())
 // --- Message Polling ---
 
 const POLL_INTERVAL = parseInt(process.env.LINQ_POLL_INTERVAL || '3000', 10)
-const seenMessageIds = new Set<string>()
-let lastPollTime = new Date().toISOString()
+const savedState = loadState()
+const seenMessageIds = new Set<string>(savedState.seenIds)
+let lastPollTime = savedState.lastPollTime
 
 async function pollForMessages(): Promise<void> {
   try {
@@ -471,14 +506,14 @@ async function pollForMessages(): Promise<void> {
               let localPath: string | undefined
               if (attData.download_url) {
                 try {
-                  fs.mkdirSync(inboxDir, { recursive: true })
+                  await fs.promises.mkdir(inboxDir, { recursive: true })
                   const dlResp = await fetch(attData.download_url, { signal: AbortSignal.timeout(15000) })
                   if (dlResp.ok) {
                     const buffer = Buffer.from(await dlResp.arrayBuffer())
-                    localPath = path.join(inboxDir, filename)
-                    fs.writeFileSync(localPath, buffer)
+                    localPath = path.join(inboxDir, `${msg.id}_${filename}`)
+                    await fs.promises.writeFile(localPath, buffer)
                   }
-                } catch {}
+                } catch (e: any) { console.error('[imessage] Failed to download attachment:', e.message) }
               }
               attachments.push({ id: partId, filename, mime_type: (part as any).mime_type || 'unknown', localPath })
             } catch {
@@ -511,7 +546,7 @@ async function pollForMessages(): Promise<void> {
               await linq.chats.messages.send(chatId, {
                 message: { parts: [{ type: 'text', value: `Pairing code: ${code}\nGive this to the Claude Code operator to approve your access.` }] },
               })
-            } catch {}
+            } catch (e: any) { console.error('[imessage] Failed to send pairing code:', e.message) }
             console.error(`[imessage] Pairing code ${code} sent to ${sender}`)
           } else {
             console.error(`[imessage] Dropped message from ${sender} (not in allowlist)`)
@@ -523,7 +558,7 @@ async function pollForMessages(): Promise<void> {
         if (access.ackReaction && msg.id) {
           try {
             await linq.messages.addReaction(msg.id, { type: access.ackReaction as any, operation: 'add', part_index: 0 })
-          } catch {}
+          } catch (e: any) { console.error('[imessage] ackReaction error:', e.message) }
         }
 
         markRead(chatId)
@@ -554,6 +589,9 @@ async function pollForMessages(): Promise<void> {
         console.error(`[imessage] ${sender}: ${messageText.substring(0, 80)}${attachments.length > 0 ? ` [${attachments.length} attachment(s)]` : ''}`)
       }
     }
+
+    lastPollTime = new Date().toISOString()
+    saveState(lastPollTime, [...seenMessageIds])
 
     if (seenMessageIds.size > 1000) {
       const arr = [...seenMessageIds]
@@ -669,8 +707,12 @@ if (startupAccess.allowFrom.length > 0) {
 
 setupContactCard()
 
-setInterval(pollForMessages, startupAccess.pollInterval || POLL_INTERVAL)
-console.error(`[imessage]   Polling started`)
+if (config.token && config.fromPhone) {
+  setInterval(pollForMessages, startupAccess.pollInterval || POLL_INTERVAL)
+  console.error(`[imessage]   Polling started`)
+} else {
+  console.error(`[imessage]   Polling skipped (not configured)`)
+}
 
 setTimeout(async () => {
   const recipient = config.defaultRecipient || startupAccess.defaultRecipient || (startupAccess.allowFrom.length > 0 ? startupAccess.allowFrom[0] : '')
