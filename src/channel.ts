@@ -84,7 +84,7 @@ function parseEnvFile(filePath: string): Record<string, string> {
       if (eq === -1) continue
       vars[trimmed.slice(0, eq).trim()] = trimmed.slice(eq + 1).trim()
     }
-  } catch {}
+  } catch (e: any) { console.error('[imessage] Failed to read env file:', e.message) }
   return vars
 }
 
@@ -108,7 +108,7 @@ function loadChannelConfig(): ChannelConfig {
     defaultRecipient = defaultRecipient || cfg.defaultRecipient || ''
     allowedSenders = allowedSenders || (cfg.allowedSenders || []).join(',')
     if (cfg.apiUrl) apiUrl = cfg.apiUrl
-  } catch {}
+  } catch (e: any) { /* config.json is optional */ }
 
   // Legacy fallback: ~/.linq/config.json
   if (!token || !fromPhone) {
@@ -327,15 +327,15 @@ async function uploadFiles(files?: string[]): Promise<string[]> {
 }
 
 async function markRead(chatId: string): Promise<void> {
-  try { await linq.chats.markAsRead(chatId) } catch {}
+  try { await linq.chats.markAsRead(chatId) } catch (e: any) { console.error('[imessage] markRead error:', e.message) }
 }
 
 async function startTyping(chatId: string): Promise<void> {
-  try { await linq.chats.typing.start(chatId) } catch {}
+  try { await linq.chats.typing.start(chatId) } catch (e: any) { console.error('[imessage] startTyping error:', e.message) }
 }
 
 async function stopTyping(chatId: string): Promise<void> {
-  try { await linq.chats.typing.stop(chatId) } catch {}
+  try { await linq.chats.typing.stop(chatId) } catch (e: any) { console.error('[imessage] stopTyping error:', e.message) }
 }
 
 // --- Tool Handlers ---
@@ -478,7 +478,7 @@ async function pollForMessages(): Promise<void> {
                     localPath = path.join(inboxDir, `${msg.id}_${filename}`)
                     await fs.promises.writeFile(localPath, buffer)
                   }
-                } catch {}
+                } catch (e: any) { console.error('[imessage] Failed to download attachment:', e.message) }
               }
               attachments.push({ id: partId, filename, mime_type: (part as any).mime_type || 'unknown', localPath })
             } catch {
@@ -511,7 +511,7 @@ async function pollForMessages(): Promise<void> {
               await linq.chats.messages.send(chatId, {
                 message: { parts: [{ type: 'text', value: `Pairing code: ${code}\nGive this to the Claude Code operator to approve your access.` }] },
               })
-            } catch {}
+            } catch (e: any) { console.error('[imessage] Failed to send pairing code:', e.message) }
             console.error(`[imessage] Pairing code ${code} sent to ${sender}`)
           } else {
             console.error(`[imessage] Dropped message from ${sender} (not in allowlist)`)
@@ -523,7 +523,7 @@ async function pollForMessages(): Promise<void> {
         if (access.ackReaction && msg.id) {
           try {
             await linq.messages.addReaction(msg.id, { type: access.ackReaction as any, operation: 'add', part_index: 0 })
-          } catch {}
+          } catch (e: any) { console.error('[imessage] ackReaction error:', e.message) }
         }
 
         markRead(chatId)
