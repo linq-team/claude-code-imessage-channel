@@ -306,14 +306,44 @@ async function uploadFile(filePath: string): Promise<string> {
 
 const BUBBLE_EFFECTS = ['slam', 'loud', 'gentle', 'invisible']
 
-function buildMessage(text: string, opts?: { effect?: string; reply_to?: string; files_ids?: string[]; text_decorations?: any[] }) {
+// Cache: phone -> 'iMessage' | 'RCS' | 'SMS' (checked once, reused forever)
+const serviceCache = new Map<string, 'iMessage' | 'RCS' | 'SMS'>()
+// Cache: chat_id -> phone number (populated during polling)
+const chatPhoneCache = new Map<string, string>()
+
+async function resolveService(phone: string): Promise<'iMessage' | 'RCS' | 'SMS'> {
+  const cached = serviceCache.get(phone)
+  if (cached) return cached
+
+  try {
+    const iMsg = await linq.capability.checkiMessage({ address: phone, from: config.fromPhone })
+    if (iMsg.available) {
+      serviceCache.set(phone, 'iMessage')
+      return 'iMessage'
+    }
+  } catch {}
+
+  try {
+    const rcs = await linq.capability.checkRCS({ address: phone, from: config.fromPhone })
+    if (rcs.available) {
+      serviceCache.set(phone, 'RCS')
+      return 'RCS'
+    }
+  } catch {}
+
+  serviceCache.set(phone, 'SMS')
+  return 'SMS'
+}
+
+function buildMessage(text: string, opts?: { effect?: string; reply_to?: string; files_ids?: string[]; text_decorations?: any[]; service?: 'iMessage' | 'RCS' | 'SMS' }) {
   const textPart: any = { type: 'text', value: text }
   if (opts?.text_decorations?.length) textPart.text_decorations = opts.text_decorations
   const parts: any[] = [textPart]
   if (opts?.files_ids) {
     for (const id of opts.files_ids) parts.push({ type: 'media', attachment_id: id })
   }
-  const message: any = { parts, preferred_service: 'iMessage' as const }
+  const service = opts?.service || 'iMessage'
+  const message: any = { parts, preferred_service: service }
   if (opts?.effect) message.effect = { name: opts.effect, type: BUBBLE_EFFECTS.includes(opts.effect) ? 'bubble' : 'screen' }
   if (opts?.reply_to) message.reply_to = { message_id: opts.reply_to }
   return message
@@ -347,11 +377,13 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
     const { chat_id, text, effect, reply_to, files, text_decorations } = args as { chat_id: string; text: string; effect?: string; reply_to?: string; files?: string[]; text_decorations?: any[] }
     try {
       await stopTyping(chat_id)
+      const phone = chatPhoneCache.get(chat_id)
+      const service = phone ? await resolveService(phone) : 'iMessage'
       const fileIds = await uploadFiles(files)
-      const message = buildMessage(text, { effect, reply_to, files_ids: fileIds, text_decorations })
+      const message = buildMessage(text, { effect, reply_to, files_ids: fileIds, text_decorations, service })
       const data = await linq.chats.messages.send(chat_id, { message })
       const messageId = data.message?.id || ''
-      return { content: [{ type: 'text' as const, text: `sent via iMessage (message_id: ${messageId})` }] }
+      return { content: [{ type: 'text' as const, text: `sent via ${service} (message_id: ${messageId})` }] }
     } catch (e: any) {
       return { content: [{ type: 'text' as const, text: `Error: ${e.message}` }], isError: true }
     }
@@ -384,8 +416,9 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
   if (name === 'send') {
     const { to, text, effect, files, text_decorations } = args as { to: string; text: string; effect?: string; files?: string[]; text_decorations?: any[] }
     try {
+      const service = await resolveService(to)
       const fileIds = await uploadFiles(files)
-      const message = buildMessage(text, { effect, files_ids: fileIds, text_decorations })
+      const message = buildMessage(text, { effect, files_ids: fileIds, text_decorations, service })
       const data = await linq.chats.create({
         to: [to],
         from: config.fromPhone,
@@ -393,7 +426,7 @@ mcp.setRequestHandler(CallToolRequestSchema, async (req) => {
       })
       const chatId = data.chat?.id || ''
       const messageId = (data.chat as any)?.message?.id || ''
-      return { content: [{ type: 'text' as const, text: `sent to ${to} (chat_id: ${chatId}, message_id: ${messageId})` }] }
+      return { content: [{ type: 'text' as const, text: `sent to ${to} via ${service} (chat_id: ${chatId}, message_id: ${messageId})` }] }
     } catch (e: any) {
       return { content: [{ type: 'text' as const, text: `Error: ${e.message}` }], isError: true }
     }
@@ -490,6 +523,9 @@ async function pollForMessages(): Promise<void> {
         if (!messageText && attachments.length === 0) continue
 
         const sender = (msg as any).from || (msg as any).from_handle?.handle || (chat as any).handles?.find((h: any) => !h.is_me)?.handle || ''
+
+        // Cache chat -> phone for reply service resolution
+        if (sender && chatId) chatPhoneCache.set(chatId, sender)
 
         // Access control
         const access = loadAccessConfig()
