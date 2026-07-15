@@ -1,8 +1,8 @@
-# iMessage Channel for Claude Code
+# Claude Code iMessage MCP & Connector
 
 Connect iMessage to your Claude Code session with an MCP server.
 
-The MCP server connects to the Linq API and provides tools to Claude to reply, react, or edit messages. When you text the Linq number, the server forwards the message to your Claude Code session.
+The Claude iMessage MCP server connects to the Linq iMessage API and provides tools to Claude to reply, react, or edit iMessages. When you text the Linq number, the server forwards the message to your Claude Code session.
 
 ## Prerequisites
 
